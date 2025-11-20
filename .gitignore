@@ -1,0 +1,7 @@
+﻿providers.json
+providers.enc
+__pycache__/
+*.pyc
+.env
+.vercel
+
