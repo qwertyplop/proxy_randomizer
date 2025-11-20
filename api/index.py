@@ -96,6 +96,55 @@ def select_random_provider(providers):
     if not choices: return None, None
     return random.choice(choices)
 
+def stream_with_stripping(upstream_generator, text_to_strip):
+    """
+    Yields chunks from upstream_generator, removing text_to_strip 
+    if it appears at the very beginning of the stream.
+    """
+    if not text_to_strip:
+        yield from upstream_generator
+        return
+
+    buffer = b""
+    target = text_to_strip.encode("utf-8")
+    check_len = len(target)
+    stripped = False
+    
+    try:
+        for chunk in upstream_generator:
+            if stripped:
+                yield chunk
+                continue
+            
+            buffer += chunk
+            
+            # If buffer is smaller than target, we need more data (unless mismatch confirmed)
+            if len(buffer) < check_len:
+                if not target.startswith(buffer):
+                    yield buffer
+                    buffer = b""
+                    stripped = True
+                continue 
+            
+            # Buffer is large enough to check
+            if buffer.startswith(target):
+                remainder = buffer[check_len:]
+                if remainder:
+                    yield remainder
+                buffer = b""
+                stripped = True
+            else:
+                yield buffer
+                buffer = b""
+                stripped = True
+
+        if buffer and not stripped:
+            yield buffer
+
+    except Exception as e:
+        print(f"Stream Error: {e}")
+        raise e
+
 def proxy_request(source_label, upstream_path_suffix):
     timestamp = datetime.now().isoformat()
     
@@ -123,6 +172,7 @@ def proxy_request(source_label, upstream_path_suffix):
     json_body = None
     data_body = None
     should_stream = True
+    prefill_used = None
 
     if request.is_json:
         try:
@@ -147,7 +197,8 @@ def proxy_request(source_label, upstream_path_suffix):
                     json_body["messages"].append({"role": "system", "content": JANITORAI_SYSTEM_PREFILL_CONTENT})
                     
                     # Prepare Assistant Prefill
-                    ass_msg = {"role": "assistant", "content": JANITORAI_PREFILL_CONTENT}
+                    prefill_used = JANITORAI_PREFILL_CONTENT
+                    ass_msg = {"role": "assistant", "content": prefill_used}
                     
                     # Mistral Specific: Requires 'prefix': True if the last message is Assistant
                     is_mistral = "mistral" in provider.get("base_url", "") or "mistral" in model_config.get("id", "")
@@ -186,8 +237,14 @@ def proxy_request(source_label, upstream_path_suffix):
             def generate():
                 for chunk in resp.iter_content(chunk_size=4096):
                     if chunk: yield chunk
-            return Response(stream_with_context(generate()), resp.status_code, headers)
+            
+            final_generator = generate()
+            if prefill_used:
+                 final_generator = stream_with_stripping(final_generator, prefill_used)
+
+            return Response(stream_with_context(final_generator), resp.status_code, headers)
         else:
+            # TODO: Handle non-streaming stripping if necessary (unlikely for this usecase)
             return Response(resp.content, resp.status_code, headers)
 
     except Exception as e:
