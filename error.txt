@@ -1,5 +1,13 @@
+PROXY ERROR 400: {"object":"error","message":"Expected last role User or Tool (or Assistant with prefix True) for serving but got assistant","type":"invalid_request_message_order","param":null,"code":"3230"} (unk)
+
+Vercel:
 
 ⬇️ Fetching config from https://files.catbox.moe/ss8i9c.enc...
-❌ Failed to load remote config: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
-⚠️ Local config not found/error: [Errno 2] No such file or directory: '/var/task/providers.json'
-127.0.0.1 - - [20/Nov/2025 17:47:59] "POST /janitorai HTTP/1.1" 500 -
+✅ Remote config loaded and decrypted successfully.
+[2025-11-20T17:56:35.570829] 🚀 ATTEMPTING REQUEST
+Source: janitorai
+Provider: Mistral
+Base URL (Config): https://api.mistral.ai/v1
+Target URL (Final): https://api.mistral.ai/v1/chat/completions
+✅ Response Status: 400
+127.0.0.1 - - [20/Nov/2025 17:56:36] "POST /janitorai HTTP/1.1" 400 -

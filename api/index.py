@@ -143,8 +143,18 @@ def proxy_request(source_label, upstream_path_suffix):
             if source_label == "janitorai" and isinstance(json_body["messages"], list):
                 enable_prefill = model_config.get("enable_prefill", False)
                 if enable_prefill:
+                    # Inject System Prompt at the end (Override)
                     json_body["messages"].append({"role": "system", "content": JANITORAI_SYSTEM_PREFILL_CONTENT})
-                    json_body["messages"].append({"role": "assistant", "content": JANITORAI_PREFILL_CONTENT})
+                    
+                    # Prepare Assistant Prefill
+                    ass_msg = {"role": "assistant", "content": JANITORAI_PREFILL_CONTENT}
+                    
+                    # Mistral Specific: Requires 'prefix': True if the last message is Assistant
+                    is_mistral = "mistral" in provider.get("base_url", "") or "mistral" in model_config.get("id", "")
+                    if is_mistral:
+                        ass_msg["prefix"] = True
+                        
+                    json_body["messages"].append(ass_msg)
 
         except Exception as e:
             print(f"⚠️ Error constructing body: {e}")
