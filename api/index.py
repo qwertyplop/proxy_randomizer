@@ -20,7 +20,7 @@ ENABLE_LOGGING = os.getenv("ENABLE_LOGGING", "true").lower() == "true"
 CONFIG_URL = os.getenv("CONFIG_URL", "")
 CONFIG_PASSWORD = os.getenv("CONFIG_PASSWORD", "")
 
-# Prefill Content (Global definitions, toggled per model)
+# Prefill Content
 JANITORAI_PREFILL_CONTENT = os.getenv("JANITORAI_PREFILL_CONTENT", "((OOC: Sure, let's proceed!))")
 _DEFAULT_SYSTEM_CONTENT = "You are a helpful assistant."
 JANITORAI_SYSTEM_PREFILL_CONTENT = os.getenv("JANITORAI_SYSTEM_PREFILL_CONTENT", _DEFAULT_SYSTEM_CONTENT)
@@ -112,21 +112,25 @@ def proxy_request(source_label, upstream_path_suffix):
     excluded_headers = ["content-length", "host", "origin", "referer", "cookie", "user-agent", "x-forwarded-for", "x-forwarded-host", "accept-encoding", "authorization"]
     clean_headers = {k: v for k, v in request.headers.items() if k.lower() not in excluded_headers}
     clean_headers["User-Agent"] = "Mozilla/5.0 (compatible; FunTimeRouter/1.0)"
-    
     clean_headers["Authorization"] = f"Bearer {provider.get('api_key', '')}"
 
     json_body = None
     data_body = None
+    should_stream = True # Default
 
     if request.is_json:
         try:
             incoming_body = request.get_json()
+            should_stream = incoming_body.get("stream", True) # Respect client preference
             
-            # 1. Start with a fresh body containing ONLY messages and stream preference
+            # 1. Start with a fresh body
             json_body = {
                 "messages": incoming_body.get("messages", []),
-                "stream": True # Enforce streaming
+                "stream": should_stream
             }
+            
+            # Copy other common parameters if needed (max_tokens, etc)? 
+            # For now, we only copy messages and stream to be safe and strict.
 
             # 2. Apply Model ID
             json_body["model"] = model_config.get("id")
@@ -136,22 +140,16 @@ def proxy_request(source_label, upstream_path_suffix):
                 for k, v in model_config["settings"].items():
                     json_body[k] = v
             
-            # 4. JanitorAI Prefill Logic (Per-Model Config)
-            # Only inject if source is JanitorAI AND the model config explicitly enables it
+            # 4. JanitorAI Prefill Logic
             if source_label == "janitorai" and isinstance(json_body["messages"], list):
-                
-                # Check model config for combined toggle (defaulting to False)
-                # If "enable_prefill" is True, inject BOTH system and assistant prefill
                 enable_prefill = model_config.get("enable_prefill", False)
-
                 if enable_prefill:
-                    # Order: System Prefill -> Assistant Prefill
                     json_body["messages"].append({"role": "system", "content": JANITORAI_SYSTEM_PREFILL_CONTENT})
                     json_body["messages"].append({"role": "assistant", "content": JANITORAI_PREFILL_CONTENT})
 
         except Exception as e:
             print(f"⚠️ Error constructing body: {e}")
-            json_body = request.get_json() # Fallback
+            json_body = request.get_json()
     else:
         data_body = request.get_data()
 
@@ -162,7 +160,7 @@ def proxy_request(source_label, upstream_path_suffix):
             headers=clean_headers,
             json=json_body,
             data=data_body,
-            stream=True,
+            stream=should_stream,
             timeout=60
         )
         
@@ -172,11 +170,14 @@ def proxy_request(source_label, upstream_path_suffix):
         headers.append(("X-FunTime-Provider", provider.get("name")))
         headers.append(("X-FunTime-Model", model_config.get("id")))
 
-        def generate():
-            for chunk in resp.iter_content(chunk_size=4096):
-                if chunk: yield chunk
-
-        return Response(stream_with_context(generate()), resp.status_code, headers)
+        if should_stream:
+            def generate():
+                for chunk in resp.iter_content(chunk_size=4096):
+                    if chunk: yield chunk
+            return Response(stream_with_context(generate()), resp.status_code, headers)
+        else:
+            # Return full response immediately
+            return Response(resp.content, resp.status_code, headers)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
