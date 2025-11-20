@@ -209,3 +209,10 @@ def home():
         "usage": "Configure CONFIG_URL and CONFIG_PASSWORD in Vercel."
     }), 200
 
+
+
+@app.route("/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+def catch_all(path):
+    print(f"⚠️ Catch-All hit: {path}")
+    return jsonify({"error": f"Catch-All: Route not found: {path}", "method": request.method}), 404
+
