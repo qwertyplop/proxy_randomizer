@@ -182,6 +182,21 @@ def proxy_request(source_label, upstream_path_suffix):
         print(f"   ❌ Connection Error: {e}")
         return jsonify({"error": f"Proxy Connection Failed: {str(e)}"}), 500
 
+@app.route("/janitorai", methods=["POST", "OPTIONS"])
+def janitor_proxy():
+    if request.method == "OPTIONS": return "", 200
+    return proxy_request("janitorai", "/chat/completions")
+
+@app.route("/sillytavern", methods=["POST", "OPTIONS"])
+def sillytavern_proxy():
+    if request.method == "OPTIONS": return "", 200
+    return proxy_request("sillytavern", "/chat/completions")
+
+@app.route("/sillytavern/chat/completions", methods=["POST", "OPTIONS"])
+def sillytavern_chat_proxy():
+    if request.method == "OPTIONS": return "", 200
+    return proxy_request("sillytavern", "/chat/completions")
+
 @app.route("/sillytavern/models", methods=["GET", "OPTIONS"])
 def sillytavern_models_proxy():
     if request.method == "OPTIONS": return "", 200
@@ -208,9 +223,7 @@ def home():
         "status": "FunTimeRouter Active",
         "usage": "Configure CONFIG_URL and CONFIG_PASSWORD in Vercel."
     }), 200
-
-
-
+    
 @app.route("/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 def catch_all(path):
     print(f"⚠️ Catch-All hit: {path}")
