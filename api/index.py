@@ -51,7 +51,9 @@ def load_providers():
     if CONFIG_URL and CONFIG_PASSWORD:
         try:
             print(f"⬇️ Fetching config from {CONFIG_URL}...")
-            resp = requests.get(CONFIG_URL, timeout=10)
+            # Add User-Agent to avoid being blocked by file hosts
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+            resp = requests.get(CONFIG_URL, headers=headers, timeout=10)
             resp.raise_for_status()
             content = resp.content
             

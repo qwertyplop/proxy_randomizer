@@ -1,0 +1,5 @@
+
+⬇️ Fetching config from https://files.catbox.moe/ss8i9c.enc...
+❌ Failed to load remote config: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+⚠️ Local config not found/error: [Errno 2] No such file or directory: '/var/task/providers.json'
+127.0.0.1 - - [20/Nov/2025 17:47:59] "POST /janitorai HTTP/1.1" 500 -
