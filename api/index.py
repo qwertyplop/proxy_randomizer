@@ -67,7 +67,7 @@ def load_providers():
             _CONFIG_CACHE = providers
             _CONFIG_CACHE_EXPIRY = datetime.now() + timedelta(minutes=5)
             
-            print("✅ Remote config loaded and decrypted.")
+            print("✅ Remote config loaded and decrypted successfully.")
             return providers
             
         except Exception as e:
@@ -101,13 +101,17 @@ def proxy_request(source_label, upstream_path_suffix):
     provider, model_config = select_random_provider(providers)
     
     if not provider or not model_config:
-        return jsonify({"error": "Configuration Error: No providers available."}), 500
+        return jsonify({"error": "Configuration Error: No providers available (Decryption failed or empty list)."}), 500
 
     base_url = provider.get("base_url", "").rstrip("/")
     target_url = f"{base_url}{upstream_path_suffix}"
     
-    if ENABLE_LOGGING:
-        print(f"\n[{timestamp}] 🎲 Selected: {provider.get('name')} -> {model_config.get('id')}")
+    # DEBUG LOGGING
+    print(f"\n[{timestamp}] 🚀 ATTEMPTING REQUEST")
+    print(f"   Source: {source_label}")
+    print(f"   Provider: {provider.get('name')}")
+    print(f"   Base URL (Config): {base_url}")
+    print(f"   Target URL (Final): {target_url}")
 
     excluded_headers = ["content-length", "host", "origin", "referer", "cookie", "user-agent", "x-forwarded-for", "x-forwarded-host", "accept-encoding", "authorization"]
     clean_headers = {k: v for k, v in request.headers.items() if k.lower() not in excluded_headers}
@@ -116,31 +120,24 @@ def proxy_request(source_label, upstream_path_suffix):
 
     json_body = None
     data_body = None
-    should_stream = True # Default
+    should_stream = True
 
     if request.is_json:
         try:
             incoming_body = request.get_json()
-            should_stream = incoming_body.get("stream", True) # Respect client preference
+            should_stream = incoming_body.get("stream", True)
             
-            # 1. Start with a fresh body
             json_body = {
                 "messages": incoming_body.get("messages", []),
                 "stream": should_stream
             }
             
-            # Copy other common parameters if needed (max_tokens, etc)? 
-            # For now, we only copy messages and stream to be safe and strict.
-
-            # 2. Apply Model ID
             json_body["model"] = model_config.get("id")
             
-            # 3. Apply Configured Settings
             if "settings" in model_config:
                 for k, v in model_config["settings"].items():
                     json_body[k] = v
             
-            # 4. JanitorAI Prefill Logic
             if source_label == "janitorai" and isinstance(json_body["messages"], list):
                 enable_prefill = model_config.get("enable_prefill", False)
                 if enable_prefill:
@@ -164,11 +161,14 @@ def proxy_request(source_label, upstream_path_suffix):
             timeout=60
         )
         
+        print(f"   ✅ Response Status: {resp.status_code}")
+        
         excluded_resp_headers = ["content-encoding", "content-length", "transfer-encoding", "connection"]
         headers = [(k, v) for k, v in resp.raw.headers.items() if k.lower() not in excluded_resp_headers]
         
         headers.append(("X-FunTime-Provider", provider.get("name")))
         headers.append(("X-FunTime-Model", model_config.get("id")))
+        headers.append(("X-FunTime-Target", target_url)) # DEBUG HEADER
 
         if should_stream:
             def generate():
@@ -176,11 +176,11 @@ def proxy_request(source_label, upstream_path_suffix):
                     if chunk: yield chunk
             return Response(stream_with_context(generate()), resp.status_code, headers)
         else:
-            # Return full response immediately
             return Response(resp.content, resp.status_code, headers)
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"   ❌ Connection Error: {e}")
+        return jsonify({"error": f"Proxy Connection Failed: {str(e)}"}), 500
 
 @app.route("/sillytavern/models", methods=["GET", "OPTIONS"])
 def sillytavern_models_proxy():
