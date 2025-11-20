@@ -111,7 +111,7 @@ def proxy_request(source_label, upstream_path_suffix):
     # DEBUG LOGGING
     print(f"\n[{timestamp}] 🚀 ATTEMPTING REQUEST")
     print(f"   Source: {source_label}")
-    print(f"   Provider: {provider.get('name')}")
+    print(f"   Provider: {provider.get('name')} | Model: {model_config.get('id')}")
     print(f"   Base URL (Config): {base_url}")
     print(f"   Target URL (Final): {target_url}")
 
