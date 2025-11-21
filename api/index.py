@@ -141,10 +141,22 @@ def stream_with_stripping(upstream_generator, text_to_strip):
         return
 
     target_bytes = text_to_strip.strip().encode("utf-8") # Strip leading/trailing spaces from config
+    
+    # Generate a smart-quote variant just in case the model "autocorrects" the prefill
+    # Replace ASCII apostrophe ' with smart quote ’ (utf-8: \xe2\x80\x99)
+    target_bytes_smart = text_to_strip.strip().replace("'", "’").encode("utf-8")
+    
+    targets = [target_bytes]
+    if target_bytes != target_bytes_smart:
+        targets.append(target_bytes_smart)
+        
     check_len = len(target_bytes)
     
     buffer = b""
     stripped = False
+    
+    # DEBUG: Print what we are looking for
+    print(f"🔍 Stripper looking for: {targets}")
     
     try:
         for chunk in upstream_generator:
@@ -157,42 +169,43 @@ def stream_with_stripping(upstream_generator, text_to_strip):
             
             buffer += chunk
             
-            # Optimization: If buffer is already longer than needed + safety margin, 
-            # and we haven't matched, we probably won't.
+            # DEBUG: Print buffer start
+            print(f"🔍 Stripper Buffer: {buffer[:50]}...")
+            
+            # Optimization: If buffer is already longer than needed + safety margin
             if len(buffer) > check_len + 20: 
-                # Try to find target in the start of buffer, allowing for some leading garbage/whitespace
-                # Decode to string for easier whitespace handling? Or stick to bytes?
-                # Let's do a simple byte check.
+                found = False
+                for t in targets:
+                    found_idx = buffer.find(t)
+                    if found_idx != -1 and found_idx < 20: # Found at start
+                         # Strip everything up to the end of target
+                         buffer = buffer[found_idx + len(t):]
+                         stripped = True
+                         found = True
+                         break
                 
-                # Check if target is in the first N bytes
-                found_idx = buffer.find(target_bytes)
-                
-                if found_idx != -1 and found_idx < 20: # Found at start
-                     # Strip everything up to the end of target
-                     buffer = buffer[found_idx + check_len:]
-                     stripped = True
-                     if buffer: yield buffer
+                if found:
+                    if buffer: yield buffer
                 else:
                     # Not found at start. Yield buffer and stop checking.
-                    # But wait, what if we matched PART of it?
-                    # 'buffer' has grown large, so we assume we have enough data.
                     yield buffer
                     buffer = b""
                     stripped = True
                 continue
 
-            # Buffer is small, keep accumulating until we have enough to check
-            # OR until we are sure we don't match.
-            # Partial match check is hard. We rely on the "large enough buffer" check above.
+            # Buffer is small, keep accumulating
             continue
 
         # End of stream
         if buffer and not stripped:
-             # One last check
-             found_idx = buffer.find(target_bytes)
-             if found_idx != -1 and found_idx < 20:
-                 yield buffer[found_idx + check_len:]
-             else:
+             found = False
+             for t in targets:
+                 found_idx = buffer.find(t)
+                 if found_idx != -1 and found_idx < 20:
+                     yield buffer[found_idx + len(t):]
+                     found = True
+                     break
+             if not found:
                  yield buffer
 
     except Exception as e:
