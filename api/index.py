@@ -35,6 +35,30 @@ GEMINI_PREFILL_CONTENT = os.getenv("GEMINI_PREFILL_CONTENT", _DEFAULT_GEMINI_CON
 _DEFAULT_GEMINI_ADDITIONAL = "<thought>\n"
 GEMINI_PREFILL_ADDITIONAL_CONTENT = os.getenv("GEMINI_PREFILL_ADDITIONAL_CONTENT", _DEFAULT_GEMINI_ADDITIONAL)
 
+_DEFAULT_MAGISTRAL_CONTENT = json.dumps({
+  "role": "system",
+  "content": [
+    {
+      "type": "text",
+      "text": "# HOW YOU SHOULD THINK AND ANSWER\n\nFirst draft your thinking process (inner monologue) until you arrive at a response. Format your response using Markdown, and use LaTeX for any mathematical equations. Write both your thoughts and the response in the same language as the input.\n\nYour thinking process must follow the template below:"
+    },
+    {
+      "type": "thinking",
+      "thinking": [
+        {
+          "type": "text",
+          "text": "Your thoughts or/and draft, like working through an exercise on scratch paper. Be as casual and as long as you want until you are confident to generate the response to the user."
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "Here, provide a self-contained response."
+    }
+  ]
+})
+MAGISTRAL_SYSTEM_PREFILL_CONTENT = os.getenv("MAGISTRAL_SYSTEM_PREFILL_CONTENT", _DEFAULT_MAGISTRAL_CONTENT)
+
 # Caching
 _CONFIG_CACHE = None
 _CONFIG_CACHE_EXPIRY = datetime.min
@@ -282,8 +306,18 @@ def proxy_request(source_label, upstream_path_suffix):
                     if "glm-4" in model_id_lower and "4.5" not in model_id_lower:
                         system_content = GLM_SYSTEM_PREFILL_CONTENT
 
-                    # Inject System Prompt at the end (Override)
-                    json_body["messages"].append({"role": "system", "content": system_content})
+                    # Determine specific logic for Magistral
+                    if "magistral" in model_id_lower:
+                         try:
+                             # Magistral uses a complex object for system prompt
+                             system_msg_obj = json.loads(MAGISTRAL_SYSTEM_PREFILL_CONTENT)
+                             json_body["messages"].append(system_msg_obj)
+                         except:
+                             # Fallback if config is just text
+                             json_body["messages"].append({"role": "system", "content": MAGISTRAL_SYSTEM_PREFILL_CONTENT})
+                    else:
+                        # Inject Standard System Prompt at the end (Override)
+                        json_body["messages"].append({"role": "system", "content": system_content})
                     
                     # Prepare Assistant Prefill
                     prefill_used = JANITORAI_PREFILL_CONTENT
