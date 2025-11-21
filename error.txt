@@ -1,13 +1,1 @@
-PROXY ERROR 400: {"object":"error","message":"Expected last role User or Tool (or Assistant with prefix True) for serving but got assistant","type":"invalid_request_message_order","param":null,"code":"3230"} (unk)
-
-Vercel:
-
-⬇️ Fetching config from https://files.catbox.moe/ss8i9c.enc...
-✅ Remote config loaded and decrypted successfully.
-[2025-11-20T17:56:35.570829] 🚀 ATTEMPTING REQUEST
-Source: janitorai
-Provider: Mistral
-Base URL (Config): https://api.mistral.ai/v1
-Target URL (Final): https://api.mistral.ai/v1/chat/completions
-✅ Response Status: 400
-127.0.0.1 - - [20/Nov/2025 17:56:36] "POST /janitorai HTTP/1.1" 400 -
+Error: The pattern "api/index.py" defined in `functions` doesn't match any Serverless Functions inside the `api` directory.
