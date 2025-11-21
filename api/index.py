@@ -130,83 +130,97 @@ def select_random_provider(providers):
     if not choices: return None, None
     return random.choice(choices)
 
-def stream_with_stripping(upstream_generator, text_to_strip):
+def stream_sse_stripping(upstream_generator, text_to_strip):
     """
-    Yields chunks from upstream_generator, removing text_to_strip 
-    if it appears at the very beginning of the stream.
-    Robustly handles cases where the prefill is split across chunks or has leading whitespace.
+    Parses SSE chunks, extracts content, strips the prefill from the logical start
+    of the message, and re-emits valid SSE chunks.
     """
     if not text_to_strip:
         yield from upstream_generator
         return
 
-    target_bytes = text_to_strip.strip().encode("utf-8") # Strip leading/trailing spaces from config
-    
-    # Generate a smart-quote variant just in case the model "autocorrects" the prefill
-    # Replace ASCII apostrophe ' with smart quote ’ (utf-8: \xe2\x80\x99)
-    target_bytes_smart = text_to_strip.strip().replace("'", "’").encode("utf-8")
-    
-    targets = [target_bytes]
-    if target_bytes != target_bytes_smart:
-        targets.append(target_bytes_smart)
-        
-    check_len = len(target_bytes)
-    
-    buffer = b""
+    target_text = text_to_strip.strip()
+    target_len = len(target_text)
     stripped = False
     
-    # DEBUG: Print what we are looking for
-    print(f"🔍 Stripper looking for: {targets}")
+    # Helper to re-serialize
+    def reserialize(original_data, new_content):
+        if "choices" not in original_data or not original_data["choices"]:
+             return f"data: {json.dumps(original_data)}\n\n".encode("utf-8")
+        original_data["choices"][0]["delta"] = {"content": new_content}
+        return f"data: {json.dumps(original_data)}\n\n".encode("utf-8")
+
+    buffer = b""
+    accumulated_content = "" # Track what we have seen so far to check against target
     
+    # We need to track if we have fully passed the check/strip phase
+    check_phase = True 
+
     try:
         for chunk in upstream_generator:
-            if stripped:
-                yield chunk
-                continue
-            
-            # Filter out empty chunks often sent at start
-            if not chunk: continue
-            
             buffer += chunk
             
-            # DEBUG: Print buffer start
-            print(f"🔍 Stripper Buffer: {buffer[:50]}...")
-            
-            # Optimization: If buffer is already longer than needed + safety margin
-            if len(buffer) > check_len + 20: 
-                found = False
-                for t in targets:
-                    found_idx = buffer.find(t)
-                    if found_idx != -1 and found_idx < 20: # Found at start
-                         # Strip everything up to the end of target
-                         buffer = buffer[found_idx + len(t):]
-                         stripped = True
-                         found = True
-                         break
+            while b"\n\n" in buffer:
+                split_idx = buffer.find(b"\n\n")
+                line = buffer[:split_idx].decode("utf-8", errors="ignore")
+                buffer = buffer[split_idx + 2:]
                 
-                if found:
-                    if buffer: yield buffer
+                if line.startswith("data: ") and line != "data: [DONE]":
+                    try:
+                        json_str = line[6:]
+                        data = json.loads(json_str)
+                        
+                        delta = data.get("choices", [{}])[0].get("delta", {})
+                        content_chunk = delta.get("content", "")
+                        
+                        if not content_chunk:
+                            # Yield non-content chunks (e.g. role, finish_reason) as-is
+                            yield line.encode("utf-8") + b"\n\n"
+                            continue
+                        
+                        if check_phase:
+                            accumulated_content += content_chunk
+                            
+                            # Check if we have matched or failed to match
+                            if accumulated_content.startswith(target_text):
+                                # Full match!
+                                # We need to emit the remainder of accumulated_content (if any)
+                                remainder = accumulated_content[target_len:]
+                                check_phase = False # Done checking
+                                stripped = True
+                                if remainder:
+                                    yield reserialize(data, remainder)
+                            
+                            elif target_text.startswith(accumulated_content):
+                                # Partial match so far. Swallow this chunk and wait for more.
+                                pass
+                                
+                            else:
+                                # Mismatch!
+                                # We swallowed previous chunks thinking they were part of target.
+                                # We must spit them out now.
+                                # Problem: We don't have the original 'data' objects for the swallowed parts.
+                                # Simplification: We just emit the full accumulated_content as a single new chunk.
+                                # This might lose 'finish_reason' or specific metadata from previous chunks, 
+                                # but for content it's fine.
+                                yield reserialize(data, accumulated_content)
+                                check_phase = False
+                        else:
+                            # Already stripped or passed check, just yield
+                            yield line.encode("utf-8") + b"\n\n"
+                            
+                    except Exception as e:
+                        print(f"SSE Strip Error: {e}")
+                        yield line.encode("utf-8") + b"\n\n"
                 else:
-                    # Not found at start. Yield buffer and stop checking.
-                    yield buffer
-                    buffer = b""
-                    stripped = True
-                continue
-
-            # Buffer is small, keep accumulating
-            continue
-
-        # End of stream
-        if buffer and not stripped:
-             found = False
-             for t in targets:
-                 found_idx = buffer.find(t)
-                 if found_idx != -1 and found_idx < 20:
-                     yield buffer[found_idx + len(t):]
-                     found = True
-                     break
-             if not found:
-                 yield buffer
+                    yield line.encode("utf-8") + b"\n\n"
+        
+        if buffer:
+            yield buffer
+            
+    except Exception as e:
+        print(f"Stream Error: {e}")
+        raise e
 
     except Exception as e:
         print(f"Stream Error: {e}")
@@ -547,7 +561,8 @@ def proxy_request(source_label, upstream_path_suffix):
             # NOTE: Prefill stripping is broken for SSE streams (it expects raw text).
             # We disable it for now or leave as is if user relies on raw-text backends.
             if prefill_used and resp.status_code == 200 and not is_magistral:
-                 final_generator = stream_with_stripping(final_generator, prefill_used)
+                 # Use SSE-aware stripping instead of raw byte stripping
+                 final_generator = stream_sse_stripping(final_generator, prefill_used)
 
             if "gemini" in model_config.get("id", "").lower() and resp.status_code == 200:
                 final_generator = stream_gemini_refinement(final_generator)
