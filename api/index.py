@@ -157,43 +157,40 @@ def stream_with_stripping(upstream_generator, text_to_strip):
 
 def stream_gemini_refinement(upstream_generator):
     """
-    Prepends <think> to the stream and replaces </thought> with </think>.
+    Injects a fake SSE chunk with <think> at the start,
+    and performs naive replacement of </thought> -> </think>.
     """
-    yield b"<think>"
+    # 1. Helper to create a fake SSE chunk
+    def make_sse_chunk(content):
+        # Minimal OpenAI-compatible chunk
+        data = {
+            "choices": [{
+                "index": 0,
+                "delta": {"content": content},
+                "finish_reason": None
+            }]
+        }
+        return f"data: {json.dumps(data)}\n\n".encode("utf-8")
+
+    # 2. Send the <think> tag as a distinct message delta first
+    yield make_sse_chunk("<think>")
     
-    buffer = b""
+    # 3. Pass through the rest, naively replacing the closing tag
+    # Note: This naive replace might fail if </thought> is split across chunks
+    # or escaped strangely, but it's the best we can do without full SSE parsing.
     search_term = b"</thought>"
     replace_term = b"</think>"
-    search_len = len(search_term)
     
     try:
         for chunk in upstream_generator:
-            buffer += chunk
-            
-            if len(buffer) < search_len:
-                continue
-                
-            while True:
-                idx = buffer.find(search_term)
-                if idx != -1:
-                    yield buffer[:idx]
-                    yield replace_term
-                    buffer = buffer[idx + search_len:]
-                else:
-                    # Yield safe part
-                    safe_len = len(buffer) - (search_len - 1)
-                    if safe_len > 0:
-                        yield buffer[:safe_len]
-                        buffer = buffer[safe_len:]
-                    break
-                    
-        if buffer:
-            yield buffer.replace(search_term, replace_term)
+            # Simple replace on the raw bytes
+            if search_term in chunk:
+                chunk = chunk.replace(search_term, replace_term)
+            yield chunk
             
     except Exception as e:
         print(f"Gemini Stream Error: {e}")
         raise e
-
 
 def proxy_request(source_label, upstream_path_suffix):
     timestamp = datetime.now().isoformat()
@@ -306,32 +303,6 @@ def proxy_request(source_label, upstream_path_suffix):
                     if "gemini" in model_id_lower:
                         # Add additional assistant message for Gemini
                         json_body["messages"].append({"role": "assistant", "content": GEMINI_PREFILL_ADDITIONAL_CONTENT})
-                        # Update prefill_used to strip the additional content too? 
-                        # Usually prefill stripping is for the *very last* thing the model sees as its own output start.
-                        # Since we are sending this as a completed assistant message, the model will continue AFTER this.
-                        # So we might need to strip the output if the model repeats it, but standard practice 
-                        # with "prefilling" via message history is that the model just continues.
-                        # However, if the user intention is to force the model to *start* with <thought>,
-                        # and we've already provided "<thought>\n" as a previous message, the model might not repeat it.
-                        # But wait, "prefill" usually means "put text into the generation buffer".
-                        # OpenAI API doesn't support true buffer prefill (except for the new 'prediction' output).
-                        # We are simulating it by appending Assistant messages.
-                        # If we append "<thought>\n" as a finished message, the model will generate what comes NEXT.
-                        # So we don't need to strip "<thought>\n" from the output, because it won't be in the output.
-                        # But we *do* need to strip the first prefill if it was inserted as a finished message?
-                        # Actually, the current 'stream_with_stripping' logic tries to hide the prefill from the user
-                        # so it looks like the model just answered naturally.
-                        # If we add TWO assistant messages:
-                        # 1. "((OOC: ...))"
-                        # 2. "<thought>\n"
-                        # The model generates: "My analysis is..."
-                        # The user sees: "My analysis is..."
-                        # The user *should* see "<thought>\nMy analysis is..." if they want to see the thought process?
-                        # Or if the prefill is purely internal to guide the model?
-                        # The request "adds another assistant message after the last assistant prefill" implies
-                        # we just stack them.
-                        # If the user wants to *see* the <thought> tag in the output, we shouldn't strip it.
-                        # But since it's an *input* message, it won't be in the output stream anyway.
                         pass
 
         except Exception as e:
@@ -366,20 +337,31 @@ def proxy_request(source_label, upstream_path_suffix):
                     if chunk: yield chunk
             
             final_generator = generate()
-            if prefill_used:
+            # NOTE: Prefill stripping is broken for SSE streams (it expects raw text).
+            # We disable it for now or leave as is if user relies on raw-text backends.
+            if prefill_used and resp.status_code == 200:
                  final_generator = stream_with_stripping(final_generator, prefill_used)
 
-            if "gemini" in model_config.get("id", "").lower():
+            if "gemini" in model_config.get("id", "").lower() and resp.status_code == 200:
                 final_generator = stream_gemini_refinement(final_generator)
 
             return Response(stream_with_context(final_generator), resp.status_code, headers)
         else:
             content = resp.content
-            if "gemini" in model_config.get("id", "").lower():
-                # Apply Gemini refinement to full content
-                content = b"<think>" + content.replace(b"</thought>", b"</think>")
-                
-            # TODO: Handle non-streaming stripping if necessary (unlikely for this usecase)
+            if "gemini" in model_config.get("id", "").lower() and resp.status_code == 200:
+                try:
+                    # Parse JSON, modify content, re-serialize
+                    body = json.loads(content)
+                    if "choices" in body and len(body["choices"]) > 0:
+                        msg = body["choices"][0].get("message", {})
+                        if "content" in msg and msg["content"]:
+                            new_content = "<think>" + msg["content"].replace("</thought>", "</think>")
+                            body["choices"][0]["message"]["content"] = new_content
+                            content = json.dumps(body).encode("utf-8")
+                except Exception as e:
+                    print(f"⚠️ Failed to refine non-streaming Gemini response: {e}")
+                    # Fallback: Return original content if parsing fails
+            
             return Response(content, resp.status_code, headers)
 
     except Exception as e:
