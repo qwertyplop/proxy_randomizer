@@ -154,6 +154,46 @@ def stream_with_stripping(upstream_generator, text_to_strip):
         print(f"Stream Error: {e}")
         raise e
 
+def stream_gemini_refinement(upstream_generator):
+    """
+    Prepends <think> to the stream and replaces </thought> with </think>.
+    """
+    yield b"<think>"
+    
+    buffer = b""
+    search_term = b"</thought>"
+    replace_term = b"</think>"
+    search_len = len(search_term)
+    
+    try:
+        for chunk in upstream_generator:
+            buffer += chunk
+            
+            if len(buffer) < search_len:
+                continue
+                
+            while True:
+                idx = buffer.find(search_term)
+                if idx != -1:
+                    yield buffer[:idx]
+                    yield replace_term
+                    buffer = buffer[idx + search_len:]
+                else:
+                    # Yield safe part
+                    safe_len = len(buffer) - (search_len - 1)
+                    if safe_len > 0:
+                        yield buffer[:safe_len]
+                        buffer = buffer[safe_len:]
+                    break
+                    
+        if buffer:
+            yield buffer.replace(search_term, replace_term)
+            
+    except Exception as e:
+        print(f"Gemini Stream Error: {e}")
+        raise e
+
+
 def proxy_request(source_label, upstream_path_suffix):
     timestamp = datetime.now().isoformat()
     
@@ -293,10 +333,18 @@ def proxy_request(source_label, upstream_path_suffix):
             if prefill_used:
                  final_generator = stream_with_stripping(final_generator, prefill_used)
 
+            if "gemini" in model_config.get("id", "").lower():
+                final_generator = stream_gemini_refinement(final_generator)
+
             return Response(stream_with_context(final_generator), resp.status_code, headers)
         else:
+            content = resp.content
+            if "gemini" in model_config.get("id", "").lower():
+                # Apply Gemini refinement to full content
+                content = b"<think>" + content.replace(b"</thought>", b"</think>")
+                
             # TODO: Handle non-streaming stripping if necessary (unlikely for this usecase)
-            return Response(resp.content, resp.status_code, headers)
+            return Response(content, resp.status_code, headers)
 
     except Exception as e:
         print(f"   ❌ Connection Error: {e}")
