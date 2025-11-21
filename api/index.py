@@ -19,6 +19,7 @@ ENABLE_LOGGING = os.getenv("ENABLE_LOGGING", "true").lower() == "true"
 # Remote Config
 CONFIG_URL = os.getenv("CONFIG_URL", "")
 CONFIG_PASSWORD = os.getenv("CONFIG_PASSWORD", "")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
 # Prefill Content
 JANITORAI_PREFILL_CONTENT = os.getenv("JANITORAI_PREFILL_CONTENT", "((OOC: Sure, let's proceed!))")
@@ -197,8 +198,42 @@ def stream_gemini_refinement(upstream_generator):
 def proxy_request(source_label, upstream_path_suffix):
     timestamp = datetime.now().isoformat()
     
+    # 1. Load Providers
     providers = load_providers()
-    provider, model_config = select_random_provider(providers)
+    
+    # 2. Pre-scan Request for Admin Bypass
+    incoming_key = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    requested_model_id = None
+    
+    # We need to peek at the body to see the requested model.
+    # request.get_json() is safe to call multiple times.
+    if request.is_json:
+        try:
+            body_peek = request.get_json()
+            requested_model_id = body_peek.get("model")
+        except:
+            pass
+
+    provider = None
+    model_config = None
+
+    # 3. Select Provider (Admin Specific or Random)
+    if ADMIN_PASSWORD and incoming_key == ADMIN_PASSWORD and requested_model_id:
+        print(f"🔒 Admin Access: Attempting to find specific model '{requested_model_id}'")
+        for p in providers:
+            if "models" in p:
+                for m in p["models"]:
+                    if m["id"] == requested_model_id:
+                        provider = p
+                        model_config = m
+                        break
+            if provider: break
+        
+        if not provider:
+             print(f"⚠️ Admin Access: Model '{requested_model_id}' not found in providers. Falling back to random.")
+
+    if not provider or not model_config:
+        provider, model_config = select_random_provider(providers)
     
     if not provider or not model_config:
         return jsonify({"error": "Configuration Error: No providers available (Decryption failed or empty list)."}), 500
@@ -233,6 +268,7 @@ def proxy_request(source_label, upstream_path_suffix):
                 "stream": should_stream
             }
             
+            # Start with the SELECTED model config
             json_body["model"] = model_config.get("id")
             
             if "settings" in model_config:
