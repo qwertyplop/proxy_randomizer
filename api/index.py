@@ -134,14 +134,16 @@ def stream_with_stripping(upstream_generator, text_to_strip):
     """
     Yields chunks from upstream_generator, removing text_to_strip 
     if it appears at the very beginning of the stream.
+    Robustly handles cases where the prefill is split across chunks or has leading whitespace.
     """
     if not text_to_strip:
         yield from upstream_generator
         return
 
+    target_bytes = text_to_strip.strip().encode("utf-8") # Strip leading/trailing spaces from config
+    check_len = len(target_bytes)
+    
     buffer = b""
-    target = text_to_strip.encode("utf-8")
-    check_len = len(target)
     stripped = False
     
     try:
@@ -150,30 +152,48 @@ def stream_with_stripping(upstream_generator, text_to_strip):
                 yield chunk
                 continue
             
+            # Filter out empty chunks often sent at start
+            if not chunk: continue
+            
             buffer += chunk
             
-            # If buffer is smaller than target, we need more data (unless mismatch confirmed)
-            if len(buffer) < check_len:
-                if not target.startswith(buffer):
+            # Optimization: If buffer is already longer than needed + safety margin, 
+            # and we haven't matched, we probably won't.
+            if len(buffer) > check_len + 20: 
+                # Try to find target in the start of buffer, allowing for some leading garbage/whitespace
+                # Decode to string for easier whitespace handling? Or stick to bytes?
+                # Let's do a simple byte check.
+                
+                # Check if target is in the first N bytes
+                found_idx = buffer.find(target_bytes)
+                
+                if found_idx != -1 and found_idx < 20: # Found at start
+                     # Strip everything up to the end of target
+                     buffer = buffer[found_idx + check_len:]
+                     stripped = True
+                     if buffer: yield buffer
+                else:
+                    # Not found at start. Yield buffer and stop checking.
+                    # But wait, what if we matched PART of it?
+                    # 'buffer' has grown large, so we assume we have enough data.
                     yield buffer
                     buffer = b""
                     stripped = True
-                continue 
-            
-            # Buffer is large enough to check
-            if buffer.startswith(target):
-                remainder = buffer[check_len:]
-                if remainder:
-                    yield remainder
-                buffer = b""
-                stripped = True
-            else:
-                yield buffer
-                buffer = b""
-                stripped = True
+                continue
 
+            # Buffer is small, keep accumulating until we have enough to check
+            # OR until we are sure we don't match.
+            # Partial match check is hard. We rely on the "large enough buffer" check above.
+            continue
+
+        # End of stream
         if buffer and not stripped:
-            yield buffer
+             # One last check
+             found_idx = buffer.find(target_bytes)
+             if found_idx != -1 and found_idx < 20:
+                 yield buffer[found_idx + check_len:]
+             else:
+                 yield buffer
 
     except Exception as e:
         print(f"Stream Error: {e}")
