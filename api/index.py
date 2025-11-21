@@ -25,6 +25,15 @@ JANITORAI_PREFILL_CONTENT = os.getenv("JANITORAI_PREFILL_CONTENT", "((OOC: Sure,
 _DEFAULT_SYSTEM_CONTENT = "You are a helpful assistant."
 JANITORAI_SYSTEM_PREFILL_CONTENT = os.getenv("JANITORAI_SYSTEM_PREFILL_CONTENT", _DEFAULT_SYSTEM_CONTENT)
 
+_DEFAULT_GLM_CONTENT = """/think
+Without writing for / as user. And always write your reasoning in English."""
+GLM_SYSTEM_PREFILL_CONTENT = os.getenv("GLM_SYSTEM_PREFILL_CONTENT", _DEFAULT_GLM_CONTENT)
+
+_DEFAULT_GEMINI_CONTENT = "((OOC: Absolutely! Let's proceed, I'll start by thinking with tag *<thought>*, and after ending the thought process with tag *</thought>*, I'll start writing actual response with tag <response>))"
+GEMINI_PREFILL_CONTENT = os.getenv("GEMINI_PREFILL_CONTENT", _DEFAULT_GEMINI_CONTENT)
+_DEFAULT_GEMINI_ADDITIONAL = "<thought>\n"
+GEMINI_PREFILL_ADDITIONAL_CONTENT = os.getenv("GEMINI_PREFILL_ADDITIONAL_CONTENT", _DEFAULT_GEMINI_ADDITIONAL)
+
 # Caching
 _CONFIG_CACHE = None
 _CONFIG_CACHE_EXPIRY = datetime.min
@@ -193,11 +202,22 @@ def proxy_request(source_label, upstream_path_suffix):
             if source_label == "janitorai" and isinstance(json_body["messages"], list):
                 enable_prefill = model_config.get("enable_prefill", False)
                 if enable_prefill:
+                    # Determine System Prompt
+                    model_id_lower = model_config.get("id", "").lower()
+                    system_content = JANITORAI_SYSTEM_PREFILL_CONTENT
+                    
+                    if "glm-4" in model_id_lower and "4.5" not in model_id_lower:
+                        system_content = GLM_SYSTEM_PREFILL_CONTENT
+
                     # Inject System Prompt at the end (Override)
-                    json_body["messages"].append({"role": "system", "content": JANITORAI_SYSTEM_PREFILL_CONTENT})
+                    json_body["messages"].append({"role": "system", "content": system_content})
                     
                     # Prepare Assistant Prefill
                     prefill_used = JANITORAI_PREFILL_CONTENT
+                    
+                    if "gemini" in model_id_lower:
+                        prefill_used = GEMINI_PREFILL_CONTENT
+                        
                     ass_msg = {"role": "assistant", "content": prefill_used}
                     
                     # Mistral Specific: Requires 'prefix': True if the last message is Assistant
@@ -206,6 +226,37 @@ def proxy_request(source_label, upstream_path_suffix):
                         ass_msg["prefix"] = True
                         
                     json_body["messages"].append(ass_msg)
+                    
+                    if "gemini" in model_id_lower:
+                        # Add additional assistant message for Gemini
+                        json_body["messages"].append({"role": "assistant", "content": GEMINI_PREFILL_ADDITIONAL_CONTENT})
+                        # Update prefill_used to strip the additional content too? 
+                        # Usually prefill stripping is for the *very last* thing the model sees as its own output start.
+                        # Since we are sending this as a completed assistant message, the model will continue AFTER this.
+                        # So we might need to strip the output if the model repeats it, but standard practice 
+                        # with "prefilling" via message history is that the model just continues.
+                        # However, if the user intention is to force the model to *start* with <thought>,
+                        # and we've already provided "<thought>\n" as a previous message, the model might not repeat it.
+                        # But wait, "prefill" usually means "put text into the generation buffer".
+                        # OpenAI API doesn't support true buffer prefill (except for the new 'prediction' output).
+                        # We are simulating it by appending Assistant messages.
+                        # If we append "<thought>\n" as a finished message, the model will generate what comes NEXT.
+                        # So we don't need to strip "<thought>\n" from the output, because it won't be in the output.
+                        # But we *do* need to strip the first prefill if it was inserted as a finished message?
+                        # Actually, the current 'stream_with_stripping' logic tries to hide the prefill from the user
+                        # so it looks like the model just answered naturally.
+                        # If we add TWO assistant messages:
+                        # 1. "((OOC: ...))"
+                        # 2. "<thought>\n"
+                        # The model generates: "My analysis is..."
+                        # The user sees: "My analysis is..."
+                        # The user *should* see "<thought>\nMy analysis is..." if they want to see the thought process?
+                        # Or if the prefill is purely internal to guide the model?
+                        # The request "adds another assistant message after the last assistant prefill" implies
+                        # we just stack them.
+                        # If the user wants to *see* the <thought> tag in the output, we shouldn't strip it.
+                        # But since it's an *input* message, it won't be in the output stream anyway.
+                        pass
 
         except Exception as e:
             print(f"⚠️ Error constructing body: {e}")
