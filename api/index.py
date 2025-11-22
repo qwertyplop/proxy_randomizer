@@ -403,6 +403,122 @@ def stream_magistral_refinement(upstream_generator, prefill_text=None):
          raise e
 
 
+def stream_deepseek_refinement(upstream_generator, prefill_text=None):
+    """
+    Parses SSE chunks from Deepseek (R1).
+    1. Handles 'reasoning_content' field.
+    2. Wraps reasoning in <think>...</think> tags.
+    3. Merges reasoning into the main 'content' stream.
+    4. Strips 'prefill_text' if found in the TEXT part of the response.
+    """
+    
+    stripped_prefill = False
+    prefill_len = len(prefill_text) if prefill_text else 0
+    is_thinking = False
+    
+    # Helper to re-serialize a chunk with NEW string content
+    def reserialize(original_data, new_content):
+        if "choices" not in original_data or not original_data["choices"]:
+            return f"data: {json.dumps(original_data)}\n\n".encode("utf-8")
+        original_data["choices"][0]["delta"] = {"content": new_content}
+        # Remove reasoning_content to avoid confusion if client parses it
+        if "reasoning_content" in original_data["choices"][0]["delta"]:
+             del original_data["choices"][0]["delta"]["reasoning_content"]
+        return f"data: {json.dumps(original_data)}\n\n".encode("utf-8")
+
+    # Helper to create a fresh SSE chunk for tags
+    def make_extra_chunk(content):
+        data = {
+            "choices": [{
+                "index": 0,
+                "delta": {"content": content},
+                "finish_reason": None
+            }]
+        }
+        return f"data: {json.dumps(data)}\n\n".encode("utf-8")
+
+    buffer = b""
+
+    try:
+        for chunk in upstream_generator:
+            buffer += chunk
+            
+            while b"\n\n" in buffer:
+                split_idx = buffer.find(b"\n\n")
+                line = buffer[:split_idx].decode("utf-8", errors="ignore")
+                buffer = buffer[split_idx + 2:]
+                
+                if line.startswith("data: ") and line != "data: [DONE]":
+                    try:
+                        json_str = line[6:] # Skip "data: "
+                        data = json.loads(json_str)
+                        
+                        delta = data.get("choices", [{}])[0].get("delta", {})
+                        
+                        reasoning_chunk = delta.get("reasoning_content", "")
+                        content_chunk = delta.get("content", "")
+                        
+                        # Logic:
+                        # If reasoning_content is present, we are thinking.
+                        # If content is present, we are (likely) done thinking or interleaved.
+                        # Deepseek usually separates them phases.
+                        
+                        output_text = ""
+                        
+                        # Handle Reasoning
+                        if reasoning_chunk:
+                            if not is_thinking:
+                                output_text += "<think>\n"
+                                is_thinking = True
+                            output_text += reasoning_chunk
+                        
+                        # Handle Content
+                        if content_chunk:
+                            if is_thinking:
+                                output_text += "\n</think>\n"
+                                is_thinking = False
+                            
+                            # Prefill Stripping (only on content)
+                            if prefill_text and not stripped_prefill:
+                                # Simple check on the chunk itself
+                                if content_chunk.startswith(prefill_text):
+                                    content_chunk = content_chunk[prefill_len:]
+                                    stripped_prefill = True
+                                    # Also strip leading junk if we just stripped prefill
+                                    content_chunk = content_chunk.lstrip("/ \n\r")
+                                elif prefill_text.startswith(content_chunk):
+                                    # Partial match logic omitted for simplicity (assume full chunk usually)
+                                    pass
+                                
+                            output_text += content_chunk
+                            
+                        if output_text:
+                            yield reserialize(data, output_text)
+                        elif not reasoning_chunk and not content_chunk:
+                             # Check finish reason to close tags
+                             if data.get("choices", [{}])[0].get("finish_reason"):
+                                 if is_thinking:
+                                     yield make_extra_chunk("\n</think>\n")
+                                     is_thinking = False
+                                 yield f"{line}\n\n".encode("utf-8")
+
+                    except Exception as e:
+                        print(f"Deepseek Parse Error: {e}")
+                        yield line.encode("utf-8") + b"\n\n"
+                else:
+                    if line == "data: [DONE]":
+                        if is_thinking:
+                             yield make_extra_chunk("\n</think>\n")
+                             is_thinking = False
+                    yield line.encode("utf-8") + b"\n\n"
+
+        if buffer:
+            yield buffer
+
+    except Exception as e:
+         print(f"Deepseek Stream Error: {e}")
+         raise e
+
 def proxy_request(source_label, upstream_path_suffix):
     timestamp = datetime.now().isoformat()
     
@@ -564,10 +680,11 @@ def proxy_request(source_label, upstream_path_suffix):
             final_generator = generate()
             
             is_magistral = "magistral" in model_config.get("id", "").lower()
+            is_deepseek = "deepseek" in model_config.get("id", "").lower()
             
             # NOTE: Prefill stripping is broken for SSE streams (it expects raw text).
             # We disable it for now or leave as is if user relies on raw-text backends.
-            if prefill_used and resp.status_code == 200 and not is_magistral:
+            if prefill_used and resp.status_code == 200 and not is_magistral and not is_deepseek:
                  # Use SSE-aware stripping instead of raw byte stripping
                  final_generator = stream_sse_stripping(final_generator, prefill_used)
 
@@ -576,6 +693,9 @@ def proxy_request(source_label, upstream_path_suffix):
             
             if is_magistral and resp.status_code == 200:
                 final_generator = stream_magistral_refinement(final_generator, prefill_used)
+                
+            if is_deepseek and resp.status_code == 200:
+                final_generator = stream_deepseek_refinement(final_generator, prefill_used)
 
             return Response(stream_with_context(final_generator), resp.status_code, headers)
         else:
