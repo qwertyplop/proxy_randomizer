@@ -599,6 +599,10 @@ def proxy_request(source_label, upstream_path_suffix):
             # Start with the SELECTED model config
             json_body["model"] = model_config.get("id")
             
+            # DeepSeek Terminus Specific: Enable thinking
+            if "terminus" in model_config.get("id", "").lower():
+                json_body["chat_template_kwargs"] = {"thinking": True}
+            
             if "settings" in model_config:
                 for k, v in model_config["settings"].items():
                     json_body[k] = v
