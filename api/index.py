@@ -539,7 +539,7 @@ def convert_openai_to_vertex(openai_body, model_id):
         elif role == "user":
             vertex_body["contents"].append({"role": "user", "parts": [{"text": content}]})
         elif role == "assistant":
-            vertex_body["contents"].append({"role": "model", "parts": [{"text": content}]}
+            vertex_body["contents"].append({"role": "model", "parts": [{"text": content}]})
             
     if system_instruction:
         vertex_body["systemInstruction"] = system_instruction

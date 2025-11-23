@@ -1,0 +1,13 @@
+Error importing api/index.py:
+Traceback (most recent call last):
+File "/var/task/vc__handler__python.py", line 218, in <module>
+__vc_spec.loader.exec_module(__vc_module)
+File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+File "<frozen importlib._bootstrap_external>", line 1133, in get_code
+File "<frozen importlib._bootstrap_external>", line 1063, in source_to_code
+File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+File "/var/task/api/index.py", line 542
+vertex_body["contents"].append({"role": "model", "parts": [{"text": content}]}
+^
+SyntaxError: '(' was never closed
+Python process exited with exit status: 1. The logs above can help with debugging the issue.
