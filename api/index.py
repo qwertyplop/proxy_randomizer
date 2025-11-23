@@ -560,6 +560,15 @@ def stream_vertex_translation(upstream_response):
         }
         return f"data: {json.dumps(data)}\n\n".encode("utf-8")
 
+    # Check for immediate upstream error
+    if upstream_response.status_code != 200:
+        try:
+            err_content = upstream_response.content.decode("utf-8", errors="ignore")
+            yield make_sse(f"\n\n**Vertex AI Error {upstream_response.status_code}:**\n{err_content}")
+        except:
+            yield make_sse(f"\n\n**Vertex AI Error {upstream_response.status_code}**")
+        return
+
     buffer = b""
     
     try:
@@ -568,7 +577,7 @@ def stream_vertex_translation(upstream_response):
             buffer += chunk
             
             while True:
-                start_idx = buffer.find(b"{ ")
+                start_idx = buffer.find(b"{")
                 if start_idx == -1:
                     if len(buffer) > 10 and b"[" in buffer: 
                          buffer = buffer[buffer.find(b"[")+1:] 
@@ -592,6 +601,13 @@ def stream_vertex_translation(upstream_response):
                     
                     try:
                         data = json.loads(json_bytes)
+                        
+                        # Check for explicit error field in the stream chunk
+                        if "error" in data:
+                            err_msg = json.dumps(data["error"])
+                            yield make_sse(f"\n\n**Vertex Stream Error:** {err_msg}")
+                            continue
+
                         candidates = data.get("candidates", [])
                         if candidates:
                             cand = candidates[0]
@@ -609,6 +625,7 @@ def stream_vertex_translation(upstream_response):
                     
     except Exception as e:
         print(f"Vertex Stream Error: {e}")
+        yield make_sse(f"\n\n**Proxy Stream Exception:** {str(e)}")
         raise e
 
 def proxy_request(source_label, upstream_path_suffix):
@@ -655,7 +672,11 @@ def proxy_request(source_label, upstream_path_suffix):
     base_url = provider.get("base_url", "").rstrip("/")
     target_url = f"{base_url}{upstream_path_suffix}"
     
-    is_vertex = ("vertex" in provider.get("name", "").lower() or "googleapis.com" in base_url) and "/openapi/" not in base_url
+    # Correct Detection logic:
+    # 1. Provider name or URL implies Vertex/Google
+    # 2. BUT NOT if it is the 'openapi' endpoint (Third-party models on Vertex use OpenAI protocol)
+    # Normalize check to handle /openapi vs /openapi/
+    is_vertex = ("vertex" in provider.get("name", "").lower() or "googleapis.com" in base_url) and "/openapi" not in base_url
     
     if is_vertex:
         model_id = model_config.get("id")
@@ -772,7 +793,9 @@ def proxy_request(source_label, upstream_path_suffix):
 
         if should_stream:
             
+            # Vertex Response Handling
             if is_vertex:
+                # Pass the response object itself, not a generator, so we can check status inside
                 return Response(stream_with_context(stream_vertex_translation(resp)), resp.status_code, headers)
 
             def generate():
