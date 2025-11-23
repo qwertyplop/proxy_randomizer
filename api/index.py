@@ -571,21 +571,21 @@ def convert_openai_to_vertex(openai_body, model_id):
 
     # Thinking Config (if requested or enabled by default for specific models)
     # Only enable if the model ID explicitly suggests reasoning capabilities
-    if "thinking" in model_id.lower():
-        t_config = {}
+    if "thinking" in model_id.lower() or "gemini-3" in model_id.lower() or "2.5" in model_id.lower():
+        t_config = {"includeThoughts": True}
         
         # User requested: Budget for 2.5, Level for 3
         if "2.5" in model_id:
-            t_config["thinkingBudget"] = 8192 # Max supported budget
+            t_config["thinkingBudget"] = 24576 
         elif "gemini-3" in model_id:
             t_config["thinkingLevel"] = "HIGH"
         else:
-            # Default fallback for other thinking models
+            # Default fallback for other thinking models (like 2.0 Flash Thinking)
             t_config["thinkingLevel"] = "HIGH"
             
         vertex_body["generationConfig"]["thinkingConfig"] = t_config
 
-    system_prompt_text = ""
+    system_instruction = None
     
     for msg in openai_body.get("messages", []):
         role = msg.get("role")
@@ -690,6 +690,11 @@ def stream_vertex_translation(upstream_response):
                             
                             for part in parts:
                                 text = part.get("text", "")
+                                thought = part.get("thought", "") 
+                                
+                                if thought:
+                                    yield make_sse(f"<think>{thought}</think>")
+                                
                                 if text:
                                     yield make_sse(text)
                                     
@@ -717,6 +722,9 @@ def translate_vertex_non_stream(raw_content):
             cand = candidates[0]
             parts = cand.get("content", {}).get("parts", [])
             for part in parts:
+                thought = part.get("thought", "")
+                if thought:
+                    full_text += f"<think>{thought}</think>"
                 full_text += part.get("text", "")
         
         # Construct OpenAI Response
@@ -835,15 +843,18 @@ def proxy_request(source_label, upstream_path_suffix):
                 if "/v1/" in base_url: version = "v1"
                 
                 # Construct the canonical Project Endpoint
-                target_url = f"https://{host_prefix}/{version}/projects/{project_id}/locations/{region}/publishers/google/models/{model_id}:streamGenerateContent"
+                api_method = "streamGenerateContent" if should_stream else "generateContent"
+                target_url = f"https://{host_prefix}/{version}/projects/{project_id}/locations/{region}/publishers/google/models/{model_id}:{api_method}"
                 
             except Exception as e:
                 print(f"⚠️ Failed to construct Project URL from SA: {e}")
                 # Fallback to what was configured
-                target_url = f"{base_url}/{model_id}:streamGenerateContent?key={api_key}"
+                api_method = "streamGenerateContent" if should_stream else "generateContent"
+                target_url = f"{base_url}/{model_id}:{api_method}?key={api_key}"
         else:
             # Static Key or manual config
-            target_url = f"{base_url}/{model_id}:streamGenerateContent?key={api_key}"
+            api_method = "streamGenerateContent" if should_stream else "generateContent"
+            target_url = f"{base_url}/{model_id}:{api_method}?key={api_key}"
     
     print(f"\n[{timestamp}] 🚀 ATTEMPTING REQUEST")
     print(f"   Source: {source_label}")
