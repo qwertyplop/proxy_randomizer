@@ -647,6 +647,7 @@ def stream_vertex_translation(upstream_response):
         return
 
     buffer = b""
+    is_thinking = False # Initialize thinking state
     
     try:
         for chunk in upstream_response.iter_content(chunk_size=1024):
