@@ -647,11 +647,11 @@ def stream_vertex_translation(upstream_response):
             return
     
         decoder = json.JSONDecoder()
-            buffer = b""
-            is_thinking = False 
-            first_chunk = True
-            
-            try:
+    buffer = b""
+    is_thinking = False 
+    first_chunk = True
+    
+    try:
                 print("⚡ Starting Vertex Stream Processing...", flush=True)
                 for chunk in upstream_response.iter_content(chunk_size=None):
                     if not chunk: continue
