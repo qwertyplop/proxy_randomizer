@@ -638,107 +638,95 @@ def stream_vertex_translation(upstream_response):
         return f"data: {json.dumps(data)}\n\n".encode("utf-8")
 
     # Check for immediate upstream error
-    if upstream_response.status_code != 200:
-        try:
-            err_content = upstream_response.content.decode("utf-8", errors="ignore")
-            yield make_sse(f"\n\n**Vertex AI Error {upstream_response.status_code}:**\n{err_content}")
-        except:
-            yield make_sse(f"\n\n**Vertex AI Error {upstream_response.status_code}**")
-        return
-
-            decoder = json.JSONDecoder()
-            buffer = b""
-            is_thinking = False 
-            first_chunk = True
-            
+        if upstream_response.status_code != 200:
             try:
-                for chunk in upstream_response.iter_content(chunk_size=1024):
-                    if not chunk: continue
-                    
-                    if first_chunk:
-                        print(f"🔍 Vertex Raw Stream Start: {chunk[:500]}")
-                        first_chunk = False
-                    
-                    buffer += chunk
-                    
-                    while True:
-                        try:
-                            # Attempt to decode the buffer
-                            # If it ends with a split multi-byte char, this raises UnicodeDecodeError
-                            buffer_str = buffer.decode("utf-8")
-                        except UnicodeDecodeError:
-                            # Wait for more data to complete the character
-                            break
-                        
-                        # Search for start of JSON object
-                        start_idx = buffer_str.find("{")
-                        
-                        if start_idx == -1:
-                            # No object start found yet. 
-                            # But we might have `[`, `,`, whitespace. 
-                            # We can safely discard everything if we haven't found `{`?
-                            # Wait, what if the chunk ends with `"` and the next char is `{` (inside a string? no, we look for object start).
-                            # What if response is `]`. 
-                            if "]" in buffer_str:
-                                 # Stream likely ending.
-                                 buffer = b""
-                                 break
-                            # Keep a small tail just in case? Or discard all?
-                            # Safe to discard whitespace and commas.
-                            # But if we just keep waiting, buffer grows.
-                            # Let's clear buffer if it's just junk.
-                            if not buffer_str.strip().strip(",").strip("["):
-                                buffer = b""
-                            break
-                        
-                        # We found a `{` at start_idx.
-                        # Try to decode from there.
-                        potential_json = buffer_str[start_idx:]
-                        
-                        try:
-                            obj, idx = decoder.raw_decode(potential_json)
-                            
-                            # Success! 'idx' is the end of the object relative to 'potential_json'
-                            # So total consumed from buffer_str is start_idx + idx
-                            total_consumed = start_idx + idx
-                            
-                            # Process Object
-                            candidates = obj.get("candidates", [])
-                            if candidates:
-                                cand = candidates[0]
-                                parts = cand.get("content", {}).get("parts", [])
-                                
-                                for part in parts:
-                                    text = part.get("text", "")
-                                    is_thought_part = part.get("thought", False)
-                                    
-                                    if is_thought_part:
-                                        if not is_thinking:
-                                            yield make_sse("<think>\n")
-                                            is_thinking = True
-                                        yield make_sse(text)
-                                    else:
-                                        if is_thinking:
-                                            yield make_sse("\n</think>\n")
-                                            is_thinking = False
-                                        yield make_sse(text)
-                                        
-                            # Check for explicit error in object
-                            if "error" in obj:
-                                 err_msg = json.dumps(obj["error"])
-                                 yield make_sse(f"\n\n**Vertex Stream Error:** {err_msg}")
+                err_content = upstream_response.content.decode("utf-8", errors="ignore")
+                yield make_sse(f"\n\n**Vertex AI Error {upstream_response.status_code}:**\n{err_content}")
+            except:
+                yield make_sse(f"\n\n**Vertex AI Error {upstream_response.status_code}**")
+            return
+    
+        decoder = json.JSONDecoder()
+        buffer = b""
+        is_thinking = False 
+        first_chunk = True
         
-                            # Advance buffer
-                            # We rely on encoding back to bytes. 
-                            remaining_str = buffer_str[total_consumed:]
-                            buffer = remaining_str.encode("utf-8")
+        try:
+            for chunk in upstream_response.iter_content(chunk_size=1024):
+                if not chunk: continue
+                
+                if first_chunk:
+                    print(f"🔍 Vertex Raw Stream Start: {chunk[:500]}")
+                    first_chunk = False
+                
+                buffer += chunk
+                
+                while True:
+                    try:
+                        # Attempt to decode the buffer
+                        buffer_str = buffer.decode("utf-8")
+                    except UnicodeDecodeError:
+                        break
+                    
+                    # Search for start of JSON object
+                    start_idx = buffer_str.find("{")
+                    
+                    if start_idx == -1:
+                        if "]" in buffer_str:
+                             buffer = b""
+                             break
+                        if not buffer_str.strip().strip(",").strip("["):
+                            buffer = b""
+                        break
+                    
+                    potential_json = buffer_str[start_idx:]
+                    
+                    try:
+                        obj, idx = decoder.raw_decode(potential_json)
+                        total_consumed = start_idx + idx
+                        
+                        # Process Object
+                        candidates = obj.get("candidates", [])
+                        if candidates:
+                            cand = candidates[0]
+                            parts = cand.get("content", {}).get("parts", [])
                             
-                        except json.JSONDecodeError:
-                            # Not enough data for a full object yet
-                            break
-                            
-            except Exception as e:def translate_vertex_non_stream(raw_content):
-    """
+                            for part in parts:
+                                text = part.get("text", "")
+                                is_thought_part = part.get("thought", False)
+                                
+                                if is_thought_part:
+                                    if not is_thinking:
+                                        yield make_sse("<think>\n")
+                                        is_thinking = True
+                                    yield make_sse(text)
+                                else:
+                                    if is_thinking:
+                                        yield make_sse("\n</think>\n")
+                                        is_thinking = False
+                                    yield make_sse(text)
+                                    
+                        if "error" in obj:
+                             err_msg = json.dumps(obj["error"])
+                             yield make_sse(f"\n\n**Vertex Stream Error:** {err_msg}")
+    
+                        remaining_str = buffer_str[total_consumed:]
+                        buffer = remaining_str.encode("utf-8")
+                        
+                    except json.JSONDecodeError:
+                        break
+                        
+            # Ensure thinking is closed at end of stream
+            if is_thinking:
+                 yield make_sse("\n</think>\n")
+                 
+            yield "data: [DONE]\n\n".encode("utf-8")
+                        
+        except Exception as e:
+            print(f"Vertex Stream Error: {e}")
+            yield make_sse(f"\n\n**Proxy Stream Exception:** {str(e)}")
+            yield "data: [DONE]\n\n".encode("utf-8")
+            raise e    """
     Translates a full Vertex AI response JSON to OpenAI Chat Completion JSON.
     """
     try:
