@@ -841,8 +841,10 @@ def proxy_request(source_label, upstream_path_suffix):
                     if "gemini" in model_id_lower:
                         json_body["messages"].append({"role": "assistant", "content": GEMINI_PREFILL_ADDITIONAL_CONTENT})
             
+            # VERTEX TRANSLATION
             if is_vertex:
                 json_body = convert_openai_to_vertex(json_body, model_config.get("id", ""))
+                print(f"🔍 Vertex Request Body: {json.dumps(json_body, indent=2)}")
 
         except Exception as e:
             print(f"⚠️ Error constructing body: {e}")
