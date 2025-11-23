@@ -600,6 +600,10 @@ def convert_openai_to_vertex(openai_body, model_id):
         elif role == "assistant":
             vertex_body["contents"].append({"role": "model", "parts": [{"text": content}]})
             
+    # Ensure conversation starts with 'user' role (Vertex constraint)
+    if vertex_body["contents"] and vertex_body["contents"][0]["role"] == "model":
+        vertex_body["contents"].insert(0, {"role": "user", "parts": [{"text": "[Conversation Started]"}]})
+
     if system_instruction:
         vertex_body["systemInstruction"] = system_instruction
         
