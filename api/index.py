@@ -761,16 +761,27 @@ def proxy_request(source_label, upstream_path_suffix):
     # 1. Load Providers
     providers = load_providers()
     
-    # 2. Pre-scan Request for Admin Bypass
-    incoming_key = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    # Initialize variables early
+    json_body = None
+    data_body = None
+    should_stream = True
+    prefill_used = None
     requested_model_id = None
-    
+
+    # Parse Request Body First
     if request.is_json:
         try:
-            body_peek = request.get_json()
-            requested_model_id = body_peek.get("model")
-        except:
-            pass
+            json_body = request.get_json()
+            # Check stream preference
+            should_stream = json_body.get("stream", True)
+            requested_model_id = json_body.get("model")
+        except Exception as e:
+            print(f"⚠️ Error parsing JSON body: {e}")
+    else:
+        data_body = request.get_data()
+
+    # 2. Pre-scan for Admin Bypass (using parsed model ID)
+    incoming_key = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
 
     provider = None
     model_config = None
@@ -802,7 +813,6 @@ def proxy_request(source_label, upstream_path_suffix):
     # Correct Detection logic:
     # 1. Provider name or URL implies Vertex/Google
     # 2. BUT NOT if it is the 'openapi' endpoint (Third-party models on Vertex use OpenAI protocol)
-    # Normalize check to handle /openapi vs /openapi/
     is_vertex = ("vertex" in provider.get("name", "").lower() or "googleapis.com" in base_url) and "/openapi" not in base_url
     
     if is_vertex:
@@ -828,13 +838,10 @@ def proxy_request(source_label, upstream_path_suffix):
                     if "us-central1" in base_url:
                         region = "us-central1"
                         host_prefix = "us-central1-aiplatform.googleapis.com"
-                    elif "europe-west1" in base_url: # Example logic, expandable
+                    elif "europe-west1" in base_url: 
                         region = "europe-west1"
                         host_prefix = "europe-west1-aiplatform.googleapis.com"
                     else:
-                        # If generic aiplatform.googleapis.com is used without 'global', 
-                        # it might be publisher endpoint. But for Project endpoint with SA, we need explicit region.
-                        # Let's default to global as per user docs if generic host is used.
                         region = "global"
                         host_prefix = "aiplatform.googleapis.com"
 
@@ -870,14 +877,10 @@ def proxy_request(source_label, upstream_path_suffix):
     if is_vertex:
         # Vertex usually expects Content-Type
         clean_headers["Content-Type"] = "application/json"
-        # API Key is in URL, header auth might conflict if we send Bearer with it.
-        # Remove Auth header for Vertex if using URL key
         if "Authorization" in clean_headers:
             del clean_headers["Authorization"]
             
         # Handle AUTO token for Native Vertex (if using ADC instead of static key)
-        # Note: Native Vertex usually uses Bearer token unless using the ?key= param.
-        # If api_key is "AUTO", we assume we want Bearer auth, not ?key=
         if api_key == "AUTO":
             token = get_google_access_token()
             if token:
@@ -897,75 +900,59 @@ def proxy_request(source_label, upstream_path_suffix):
         
     clean_headers["Origin"] = "https://localhost"
 
-    json_body = None
-    data_body = None
-    should_stream = True
-    prefill_used = None
+    # Process Body (if we haven't modified it yet for translation)
+    if json_body: # Already parsed above
+        # We need to reconstruct the body for the request if we are modifying it
+        # The logic below modifies json_body in place or replaces it
+        
+        # Start with the SELECTED model config (if not already set or if changed)
+        json_body["model"] = model_config.get("id")
+        
+        if "terminus" in model_config.get("id", "").lower():
+            json_body["chat_template_kwargs"] = {"thinking": True}
+        
+        if "settings" in model_config:
+            for k, v in model_config["settings"].items():
+                json_body[k] = v
+        
+        if source_label == "janitorai" and isinstance(json_body.get("messages"), list):
+            enable_prefill = model_config.get("enable_prefill", False)
+            if enable_prefill:
+                model_id_lower = model_config.get("id", "").lower()
+                system_content = JANITORAI_SYSTEM_PREFILL_CONTENT
+                
+                if "glm-4" in model_id_lower and "4.5" not in model_id_lower:
+                    system_content = GLM_SYSTEM_PREFILL_CONTENT
 
-    if request.is_json:
-        try:
-            incoming_body = request.get_json()
-            should_stream = incoming_body.get("stream", True)
-            
-            json_body = {
-                "messages": incoming_body.get("messages", []),
-                "stream": should_stream
-            }
-            
-            json_body["model"] = model_config.get("id")
-            
-            if "terminus" in model_config.get("id", "").lower():
-                json_body["chat_template_kwargs"] = {"thinking": True}
-            
-            if "settings" in model_config:
-                for k, v in model_config["settings"].items():
-                    json_body[k] = v
-            
-            if source_label == "janitorai" and isinstance(json_body["messages"], list):
-                enable_prefill = model_config.get("enable_prefill", False)
-                if enable_prefill:
-                    model_id_lower = model_config.get("id", "").lower()
-                    system_content = JANITORAI_SYSTEM_PREFILL_CONTENT
+                if "magistral" in model_id_lower:
+                        try:
+                            system_msg_obj = json.loads(MAGISTRAL_SYSTEM_PREFILL_CONTENT)
+                            json_body["messages"].append(system_msg_obj)
+                        except:
+                            json_body["messages"].append({"role": "system", "content": MAGISTRAL_SYSTEM_PREFILL_CONTENT})
+                else:
+                    json_body["messages"].append({"role": "system", "content": system_content})
+                
+                prefill_used = JANITORAI_PREFILL_CONTENT
+                
+                if "gemini" in model_id_lower:
+                    prefill_used = GEMINI_PREFILL_CONTENT
                     
-                    if "glm-4" in model_id_lower and "4.5" not in model_id_lower:
-                        system_content = GLM_SYSTEM_PREFILL_CONTENT
-
-                    if "magistral" in model_id_lower:
-                         try:
-                             system_msg_obj = json.loads(MAGISTRAL_SYSTEM_PREFILL_CONTENT)
-                             json_body["messages"].append(system_msg_obj)
-                         except:
-                             json_body["messages"].append({"role": "system", "content": MAGISTRAL_SYSTEM_PREFILL_CONTENT})
-                    else:
-                        json_body["messages"].append({"role": "system", "content": system_content})
+                ass_msg = {"role": "assistant", "content": prefill_used}
+                
+                is_mistral = "mistral" in provider.get("base_url", "") or "mistral" in model_config.get("id", "")
+                if is_mistral:
+                    ass_msg["prefix"] = True
                     
-                    prefill_used = JANITORAI_PREFILL_CONTENT
-                    
-                    if "gemini" in model_id_lower:
-                        prefill_used = GEMINI_PREFILL_CONTENT
-                        
-                    ass_msg = {"role": "assistant", "content": prefill_used}
-                    
-                    is_mistral = "mistral" in provider.get("base_url", "") or "mistral" in model_config.get("id", "")
-                    if is_mistral:
-                        ass_msg["prefix"] = True
-                        
-                    json_body["messages"].append(ass_msg)
-                    
-                    if "gemini" in model_id_lower:
-                        json_body["messages"].append({"role": "assistant", "content": GEMINI_PREFILL_ADDITIONAL_CONTENT})
-            
-            # VERTEX TRANSLATION
-            if is_vertex:
-                json_body = convert_openai_to_vertex(json_body, model_config.get("id", ""))
-                print(f"🔍 Vertex Request Body: {json.dumps(json_body, indent=2)}")
-
-        except Exception as e:
-            print(f"⚠️ Error constructing body: {e}")
-            json_body = request.get_json()
-    else:
-        data_body = request.get_data()
-
+                json_body["messages"].append(ass_msg)
+                
+                if "gemini" in model_id_lower:
+                    json_body["messages"].append({"role": "assistant", "content": GEMINI_PREFILL_ADDITIONAL_CONTENT})
+        
+        # VERTEX TRANSLATION
+        if is_vertex:
+            json_body = convert_openai_to_vertex(json_body, model_config.get("id", ""))
+            print(f"🔍 Vertex Request Body: {json.dumps(json_body, indent=2)}")
     try:
         resp = requests.request(
             method=request.method,

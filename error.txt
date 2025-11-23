@@ -1,0 +1,37 @@
+2025-11-23 17:41:12.652 [info] ⬇️ Fetching config from https://files.catbox.moe/uhcn8q.enc...
+2025-11-23 17:41:13.071 [info] ✅ Remote config loaded and decrypted successfully.
+2025-11-23 17:41:13.072 [info] 🔒 Admin Access: Attempting to find specific model 'gemini-2.5-pro'
+2025-11-23 17:41:13.072 [info] ⚠️ Failed to construct Project URL from SA: cannot access local variable 'should_stream' where it is not associated with a value
+2025-11-23 17:41:13.074 [error] Exception on /sillytavern/chat/completions [POST]
+Traceback (most recent call last):
+  File "/var/task/api/index.py", line 846, in proxy_request
+    api_method = "streamGenerateContent" if should_stream else "generateContent"
+                                            ^^^^^^^^^^^^^
+UnboundLocalError: cannot access local variable 'should_stream' where it is not associated with a value
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/var/task/_vendor/flask/app.py", line 1455, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/task/_vendor/flask/app.py", line 869, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/task/_vendor/flask_cors/extension.py", line 176, in wrapped_function
+    return cors_after_request(app.make_response(f(*args, **kwargs)))
+                                                ^^^^^^^^^^^^^^^^^^
+  File "/var/task/_vendor/flask/app.py", line 867, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/task/_vendor/flask/app.py", line 852, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/task/api/index.py", line 1062, in sillytavern_chat_proxy
+    return proxy_request("sillytavern", "/chat/completions")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/task/api/index.py", line 852, in proxy_request
+    api_method = "streamGenerateContent" if should_stream else "generateContent"
+                                            ^^^^^^^^^^^^^
+UnboundLocalError: cannot access local variable 'should_stream' where it is not associated with a value
+2025-11-23 17:41:13.075 [info] 127.0.0.1 - - [23/Nov/2025 17:41:13] "POST /sillytavern/chat/completions HTTP/1.1" 500 -
