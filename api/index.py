@@ -585,27 +585,39 @@ def convert_openai_to_vertex(openai_body, model_id):
             
         vertex_body["generationConfig"]["thinkingConfig"] = t_config
 
-    system_instruction = None
+    system_prompt_text = ""
     
     for msg in openai_body.get("messages", []):
         role = msg.get("role")
         content = msg.get("content", "")
         
         if role == "system":
-            if system_instruction is None:
-                system_instruction = {"parts": []}
-            system_instruction["parts"].append({"text": content})
+            # Collect system prompt to prepend to first user message
+            system_prompt_text += content + "\n\n"
         elif role == "user":
             vertex_body["contents"].append({"role": "user", "parts": [{"text": content}]})
         elif role == "assistant":
             vertex_body["contents"].append({"role": "model", "parts": [{"text": content}]})
             
-    # Ensure conversation starts with 'user' role (Vertex constraint)
-    if vertex_body["contents"] and vertex_body["contents"][0]["role"] == "model":
-        vertex_body["contents"].insert(0, {"role": "user", "parts": [{"text": "[Conversation Started]"}]})
+    # Ensure conversation starts with 'user' role and inject system prompt
+    if vertex_body["contents"]:
+        if vertex_body["contents"][0]["role"] == "model":
+            # If starts with model, insert dummy user with system prompt
+            initial_text = (system_prompt_text + "[Conversation Started]").strip()
+            vertex_body["contents"].insert(0, {"role": "user", "parts": [{"text": initial_text}]})
+        else:
+            # If starts with user, prepend system prompt to it
+            if system_prompt_text:
+                original_text = vertex_body["contents"][0]["parts"][0]["text"]
+                vertex_body["contents"][0]["parts"][0]["text"] = system_prompt_text + original_text
+    else:
+        # Empty conversation?
+        if system_prompt_text:
+             vertex_body["contents"].append({"role": "user", "parts": [{"text": system_prompt_text}]})
 
-    if system_instruction:
-        vertex_body["systemInstruction"] = system_instruction
+    # vertex_body["systemInstruction"] is NOT used to avoid 400 errors on models that don't support it.
+        
+    return vertex_body
         
     return vertex_body
 
