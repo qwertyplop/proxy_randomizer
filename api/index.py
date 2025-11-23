@@ -662,8 +662,9 @@ def stream_vertex_translation(upstream_response):
                     
                     buffer += chunk
                     
-                    while True:                    try:
-                        # Attempt to decode the buffer
+                    while True:
+                try:
+                    # Attempt to decode the buffer
                         buffer_str = buffer.decode("utf-8")
                     except UnicodeDecodeError:
                         break
