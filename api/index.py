@@ -10,6 +10,14 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+# Google Auth
+try:
+    from google.oauth2 import service_account
+    import google.auth.transport.requests
+    GOOGLE_AUTH_AVAILABLE = True
+except ImportError:
+    GOOGLE_AUTH_AVAILABLE = False
+
 # ============================================================================ 
 # ⚙️ CONFIGURATION
 # ============================================================================ 
@@ -20,6 +28,7 @@ ENABLE_LOGGING = os.getenv("ENABLE_LOGGING", "true").lower() == "true"
 CONFIG_URL = os.getenv("CONFIG_URL", "")
 CONFIG_PASSWORD = os.getenv("CONFIG_PASSWORD", "")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+GOOGLE_SA_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 
 # Prefill Content
 JANITORAI_PREFILL_CONTENT = os.getenv("JANITORAI_PREFILL_CONTENT", "((OOC: Sure, let's proceed!))")
@@ -62,9 +71,46 @@ MAGISTRAL_SYSTEM_PREFILL_CONTENT = os.getenv("MAGISTRAL_SYSTEM_PREFILL_CONTENT",
 # Caching
 _CONFIG_CACHE = None
 _CONFIG_CACHE_EXPIRY = datetime.min
+_GOOGLE_CREDS_CACHE = None
 
 app = Flask(__name__)
 CORS(app)
+
+def get_google_access_token():
+    """
+    Generates a fresh Google Access Token using Service Account credentials
+    stored in the GOOGLE_SERVICE_ACCOUNT_JSON environment variable.
+    """
+    global _GOOGLE_CREDS_CACHE
+    
+    if not GOOGLE_AUTH_AVAILABLE:
+        print("⚠️ Google Auth libraries not installed. Cannot auto-generate tokens.")
+        return None
+
+    if not GOOGLE_SA_JSON:
+        print("⚠️ GOOGLE_SERVICE_ACCOUNT_JSON env var not set.")
+        return None
+
+    try:
+        if _GOOGLE_CREDS_CACHE is None:
+            info = json.loads(GOOGLE_SA_JSON)
+            _GOOGLE_CREDS_CACHE = service_account.Credentials.from_service_account_info(
+                info,
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+        
+        creds = _GOOGLE_CREDS_CACHE
+        
+        # Refresh if expired or no token
+        if not creds.valid:
+            request_adapter = google.auth.transport.requests.Request()
+            creds.refresh(request_adapter)
+            
+        return creds.token
+        
+    except Exception as e:
+        print(f"❌ Failed to generate Google Token: {e}")
+        return None
 
 def get_decryption_key(password: str, salt: bytes) -> bytes:
     kdf = PBKDF2HMAC(
@@ -695,14 +741,34 @@ def proxy_request(source_label, upstream_path_suffix):
     clean_headers["User-Agent"] = "Mozilla/5.0 (compatible; FunTimeRouter/1.0)"
     
     if is_vertex:
+        # Vertex usually expects Content-Type
         clean_headers["Content-Type"] = "application/json"
+        # API Key is in URL, header auth might conflict if we send Bearer with it.
+        # Remove Auth header for Vertex if using URL key
         if "Authorization" in clean_headers:
             del clean_headers["Authorization"]
+            
+        # Handle AUTO token for Native Vertex (if using ADC instead of static key)
+        # Note: Native Vertex usually uses Bearer token unless using the ?key= param.
+        # If api_key is "AUTO", we assume we want Bearer auth, not ?key=
+        if api_key == "AUTO":
+            token = get_google_access_token()
+            if token:
+                clean_headers["Authorization"] = f"Bearer {token}"
+                # Remove key param from URL since we use Bearer
+                target_url = target_url.replace("?key=AUTO", "").replace("&key=AUTO", "")
+                
     else:
-        clean_headers["Authorization"] = f"Bearer {provider.get('api_key', '')}"
+        # Standard Provider (including Vertex MAAS)
+        p_key = provider.get('api_key', '')
+        if p_key == "AUTO":
+             token = get_google_access_token()
+             if token:
+                 p_key = token
+                 
+        clean_headers["Authorization"] = f"Bearer {p_key}"
         
-    clean_headers["Origin"] = "https://localhost" 
-    clean_headers["Referer"] = "https://localhost/" 
+    clean_headers["Origin"] = "https://localhost"
 
     json_body = None
     data_body = None
