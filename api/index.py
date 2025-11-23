@@ -569,7 +569,22 @@ def convert_openai_to_vertex(openai_body, model_id):
         ]
     }
 
-    # vertex_body["generationConfig"]["thinkingConfig"] ...
+    # Thinking Config (if requested or enabled by default for specific models)
+    # Only enable if the model ID explicitly suggests reasoning capabilities
+    if "thinking" in model_id.lower() or "gemini-3" in model_id.lower() or "2.5" in model_id.lower():
+        print(f"🧠 Enabling Thinking Config for {model_id}")
+        t_config = {"includeThoughts": True}
+        
+        # User requested: Budget for 2.5, Level for 3
+        if "2.5" in model_id:
+            t_config["thinkingBudget"] = 24576 
+        elif "gemini-3" in model_id:
+            t_config["thinkingLevel"] = "HIGH"
+        else:
+            # Default fallback for other thinking models (like 2.0 Flash Thinking)
+            t_config["thinkingLevel"] = "HIGH"
+            
+        vertex_body["generationConfig"]["thinkingConfig"] = t_config
 
     system_instruction = None
     system_prompt_text = "" # Initialize variable
@@ -676,6 +691,10 @@ def stream_vertex_translation(upstream_response):
                             parts = cand.get("content", {}).get("parts", [])
                             
                             for part in parts:
+                                # Debug: Check for hidden fields
+                                if any(k != "text" for k in part.keys()):
+                                    print(f"🔍 Vertex Part with Extras: {json.dumps(part)}")
+
                                 text = part.get("text", "")
                                 thought = part.get("thought", "") 
                                 
@@ -1001,7 +1020,8 @@ def proxy_request(source_label, upstream_path_suffix):
             if is_vertex and resp.status_code == 200:
                 content = translate_vertex_non_stream(content)
             
-            if "gemini" in model_config.get("id", "").lower() and resp.status_code == 200:
+            # Only apply generic Gemini refinement if NOT Vertex (avoid double tag)
+            if "gemini" in model_config.get("id", "").lower() and resp.status_code == 200 and not is_vertex:
                 try:
                     # Parse JSON, modify content, re-serialize
                     body = json.loads(content)
