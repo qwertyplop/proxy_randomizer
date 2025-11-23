@@ -881,6 +881,12 @@ def proxy_request(source_label, upstream_path_suffix):
         
         print(f"   ✅ Response Status: {resp.status_code}")
         
+        if resp.status_code >= 400:
+            try:
+                print(f"❌ Error Body: {resp.text[:1000]}") # Log first 1000 chars of error
+            except:
+                pass
+        
         excluded_resp_headers = ["content-encoding", "content-length", "transfer-encoding", "connection"]
         headers = [(k, v) for k, v in resp.raw.headers.items() if k.lower() not in excluded_resp_headers]
         
