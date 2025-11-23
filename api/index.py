@@ -645,10 +645,16 @@ def stream_vertex_translation(upstream_response):
         return
 
     buffer = b""
+    first_chunk = True
     
     try:
         for chunk in upstream_response.iter_content(chunk_size=1024):
             if not chunk: continue
+            
+            if first_chunk:
+                print(f"🔍 Vertex Raw Stream Start: {chunk[:200]}")
+                first_chunk = False
+                
             buffer += chunk
             
             while True:
