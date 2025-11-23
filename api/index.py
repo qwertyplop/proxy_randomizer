@@ -714,10 +714,13 @@ def stream_vertex_translation(upstream_response):
         # Ensure thinking is closed at end of stream
         if is_thinking:
              yield make_sse("\n</think>\n")
+             
+        yield "data: [DONE]\n\n".encode("utf-8")
                     
     except Exception as e:
         print(f"Vertex Stream Error: {e}")
         yield make_sse(f"\n\n**Proxy Stream Exception:** {str(e)}")
+        yield "data: [DONE]\n\n".encode("utf-8") # Ensure close on error
         raise e
 
 def translate_vertex_non_stream(raw_content):
