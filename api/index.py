@@ -754,9 +754,52 @@ def proxy_request(source_label, upstream_path_suffix):
     is_vertex = ("vertex" in provider.get("name", "").lower() or "googleapis.com" in base_url) and "/openapi" not in base_url
     
     if is_vertex:
+        # Vertex API Construction
         model_id = model_config.get("id")
         api_key = provider.get("api_key")
-        target_url = f"{base_url}/{model_id}:streamGenerateContent?key={api_key}"
+        
+        # If using Service Account (AUTO), we MUST use the Project-Scoped Endpoint
+        if api_key == "AUTO" and GOOGLE_SA_JSON:
+            try:
+                sa_info = json.loads(GOOGLE_SA_JSON)
+                project_id = sa_info.get("project_id")
+                
+                # Determine region from base_url or default to us-central1
+                region = "us-central1" # Default fallback
+                host_prefix = "us-central1-aiplatform.googleapis.com" # Default host
+                
+                if "global" in base_url:
+                    region = "global"
+                    host_prefix = "aiplatform.googleapis.com" # Global host
+                elif "aiplatform.googleapis.com" in base_url:
+                    # Check for regional prefix
+                    if "us-central1" in base_url:
+                        region = "us-central1"
+                        host_prefix = "us-central1-aiplatform.googleapis.com"
+                    elif "europe-west1" in base_url: # Example logic, expandable
+                        region = "europe-west1"
+                        host_prefix = "europe-west1-aiplatform.googleapis.com"
+                    else:
+                        # If generic aiplatform.googleapis.com is used without 'global', 
+                        # it might be publisher endpoint. But for Project endpoint with SA, we need explicit region.
+                        # Let's default to global as per user docs if generic host is used.
+                        region = "global"
+                        host_prefix = "aiplatform.googleapis.com"
+
+                # Force v1beta1 for newer models just in case, or respect config?
+                version = "v1beta1"
+                if "/v1/" in base_url: version = "v1"
+                
+                # Construct the canonical Project Endpoint
+                target_url = f"https://{host_prefix}/{version}/projects/{project_id}/locations/{region}/publishers/google/models/{model_id}:streamGenerateContent"
+                
+            except Exception as e:
+                print(f"⚠️ Failed to construct Project URL from SA: {e}")
+                # Fallback to what was configured
+                target_url = f"{base_url}/{model_id}:streamGenerateContent?key={api_key}"
+        else:
+            # Static Key or manual config
+            target_url = f"{base_url}/{model_id}:streamGenerateContent?key={api_key}"
     
     print(f"\n[{timestamp}] 🚀 ATTEMPTING REQUEST")
     print(f"   Source: {source_label}")
