@@ -569,23 +569,10 @@ def convert_openai_to_vertex(openai_body, model_id):
         ]
     }
 
-    # Thinking Config (if requested or enabled by default for specific models)
-    # Only enable if the model ID explicitly suggests reasoning capabilities
-    if "thinking" in model_id.lower() or "gemini-3" in model_id.lower() or "2.5" in model_id.lower():
-        t_config = {"includeThoughts": True}
-        
-        # User requested: Budget for 2.5, Level for 3
-        if "2.5" in model_id:
-            t_config["thinkingBudget"] = 24576 
-        elif "gemini-3" in model_id:
-            t_config["thinkingLevel"] = "HIGH"
-        else:
-            # Default fallback for other thinking models (like 2.0 Flash Thinking)
-            t_config["thinkingLevel"] = "HIGH"
-            
-        vertex_body["generationConfig"]["thinkingConfig"] = t_config
+    # vertex_body["generationConfig"]["thinkingConfig"] ...
 
     system_instruction = None
+    system_prompt_text = "" # Initialize variable
     
     for msg in openai_body.get("messages", []):
         role = msg.get("role")
