@@ -645,16 +645,10 @@ def stream_vertex_translation(upstream_response):
         return
 
     buffer = b""
-    first_chunk = True
     
     try:
         for chunk in upstream_response.iter_content(chunk_size=1024):
             if not chunk: continue
-            
-            if first_chunk:
-                print(f"🔍 Vertex Raw Stream Start: {chunk[:200]}")
-                first_chunk = False
-                
             buffer += chunk
             
             while True:
@@ -708,6 +702,50 @@ def stream_vertex_translation(upstream_response):
         print(f"Vertex Stream Error: {e}")
         yield make_sse(f"\n\n**Proxy Stream Exception:** {str(e)}")
         raise e
+
+def translate_vertex_non_stream(raw_content):
+    """
+    Translates a full Vertex AI response JSON to OpenAI Chat Completion JSON.
+    """
+    try:
+        data = json.loads(raw_content)
+        
+        # Extract content
+        full_text = ""
+        candidates = data.get("candidates", [])
+        if candidates:
+            cand = candidates[0]
+            parts = cand.get("content", {}).get("parts", [])
+            for part in parts:
+                full_text += part.get("text", "")
+        
+        # Construct OpenAI Response
+        openai_resp = {
+            "id": "chatcmpl-vertex-" + str(random.randint(100000, 999999)),
+            "object": "chat.completion",
+            "created": int(datetime.now().timestamp()),
+            "model": "vertex-gemini", # Placeholder
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": full_text
+                    },
+                    "finish_reason": "stop"
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 0, # We don't parse metadata yet
+                "completion_tokens": 0,
+                "total_tokens": 0
+            }
+        }
+        return json.dumps(openai_resp).encode("utf-8")
+        
+    except Exception as e:
+        print(f"❌ Vertex Non-Stream Translation Error: {e}")
+        return raw_content # Fallback to raw if parsing fails
 
 def proxy_request(source_label, upstream_path_suffix):
     timestamp = datetime.now().isoformat()
@@ -974,8 +1012,13 @@ def proxy_request(source_label, upstream_path_suffix):
             return Response(stream_with_context(final_generator), resp.status_code, headers)
         else:
             content = resp.content
+            
+            if is_vertex and resp.status_code == 200:
+                content = translate_vertex_non_stream(content)
+            
             if "gemini" in model_config.get("id", "").lower() and resp.status_code == 200:
                 try:
+                    # Parse JSON, modify content, re-serialize
                     body = json.loads(content)
                     if "choices" in body and len(body["choices"]) > 0:
                         msg = body["choices"][0].get("message", {})
