@@ -691,23 +691,28 @@ def stream_vertex_translation(upstream_response):
                             parts = cand.get("content", {}).get("parts", [])
                             
                             for part in parts:
-                                # Debug: Check for hidden fields
-                                if any(k != "text" for k in part.keys()):
-                                    print(f"🔍 Vertex Part with Extras: {json.dumps(part)}")
-
                                 text = part.get("text", "")
-                                thought = part.get("thought", "") 
+                                is_thought_part = part.get("thought", False)
                                 
-                                if thought:
-                                    yield make_sse(f"<think>{thought}</think>")
-                                
-                                if text:
+                                if is_thought_part:
+                                    if not is_thinking:
+                                        yield make_sse("<think>\n")
+                                        is_thinking = True
+                                    yield make_sse(text)
+                                else:
+                                    if is_thinking:
+                                        yield make_sse("\n</think>\n")
+                                        is_thinking = False
                                     yield make_sse(text)
                                     
                     except Exception as e:
                         print(f"Vertex JSON Parse Error: {e}")
                 else:
                     break
+        
+        # Ensure thinking is closed at end of stream
+        if is_thinking:
+             yield make_sse("\n</think>\n")
                     
     except Exception as e:
         print(f"Vertex Stream Error: {e}")
@@ -727,11 +732,25 @@ def translate_vertex_non_stream(raw_content):
         if candidates:
             cand = candidates[0]
             parts = cand.get("content", {}).get("parts", [])
+            
+            is_thinking = False
             for part in parts:
-                thought = part.get("thought", "")
-                if thought:
-                    full_text += f"<think>{thought}</think>"
-                full_text += part.get("text", "")
+                text = part.get("text", "")
+                is_thought_part = part.get("thought", False)
+                
+                if is_thought_part:
+                    if not is_thinking:
+                        full_text += "<think>\n"
+                        is_thinking = True
+                    full_text += text
+                else:
+                    if is_thinking:
+                        full_text += "\n</think>\n"
+                        is_thinking = False
+                    full_text += text
+            
+            if is_thinking:
+                full_text += "\n</think>\n"
         
         # Construct OpenAI Response
         openai_resp = {
