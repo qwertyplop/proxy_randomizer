@@ -647,10 +647,10 @@ def stream_vertex_translation(upstream_response):
             return
     
         decoder = json.JSONDecoder()
-        buffer = b""
-        is_thinking = False 
-        first_chunk = True
-        
+            buffer = b""
+            is_thinking = False 
+            first_chunk = True
+            
             try:
                 print("⚡ Starting Vertex Stream Processing...", flush=True)
                 for chunk in upstream_response.iter_content(chunk_size=None):
@@ -660,9 +660,9 @@ def stream_vertex_translation(upstream_response):
                         print(f"🔍 Vertex Raw Stream Start: {chunk[:500]}", flush=True)
                         first_chunk = False
                     
-                    buffer += chunk                
-                while True:
-                    try:
+                    buffer += chunk
+                    
+                    while True:                    try:
                         # Attempt to decode the buffer
                         buffer_str = buffer.decode("utf-8")
                     except UnicodeDecodeError:
