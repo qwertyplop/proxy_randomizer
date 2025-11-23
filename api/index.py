@@ -726,7 +726,10 @@ def stream_vertex_translation(upstream_response):
             print(f"Vertex Stream Error: {e}")
             yield make_sse(f"\n\n**Proxy Stream Exception:** {str(e)}")
             yield "data: [DONE]\n\n".encode("utf-8")
-            raise e    """
+            raise e
+
+def translate_vertex_non_stream(raw_content):
+    """
     Translates a full Vertex AI response JSON to OpenAI Chat Completion JSON.
     """
     try:
