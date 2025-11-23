@@ -1,11 +1,13 @@
-2025-11-23 18:29:32.498 [info] 🔒 Admin Access: Attempting to find specific model 'gemini-2.5-pro'
-2025-11-23 18:29:32.498 [info] [2025-11-23T18:29:32.493581] 🚀 ATTEMPTING REQUEST
-2025-11-23 18:29:32.498 [info] Source: janitorai
-2025-11-23 18:29:32.498 [info] Provider: Vertex-Gemini | Model: gemini-2.5-pro
-2025-11-23 18:29:32.498 [info] Base URL (Config): https://aiplatform.googleapis.com/v1/publishers/google/models
-2025-11-23 18:29:32.498 [info] Target URL (Final): https://aiplatform.googleapis.com/v1/projects/gen-lang-client-0031641020/locations/global/publishers/google/models/gemini-2.5-pro:streamGenerateContent
-2025-11-23 18:29:32.498 [info] 🧠 Enabling Thinking Config for gemini-2.5-pro
-2025-11-23 18:29:32.498 [info] 🔍 Vertex Request Body: {
+2025-11-23 19:10:34.055 [info] ⬇️ Fetching config from https://files.catbox.moe/uhcn8q.enc...
+2025-11-23 19:10:34.482 [info] ✅ Remote config loaded and decrypted successfully.
+2025-11-23 19:10:34.483 [info] 🔒 Admin Access: Attempting to find specific model 'gemini-2.5-pro'
+2025-11-23 19:10:34.483 [info] [2025-11-23T19:10:34.054894] 🚀 ATTEMPTING REQUEST
+2025-11-23 19:10:34.484 [info] Source: janitorai
+2025-11-23 19:10:34.484 [info] Provider: Vertex-Gemini | Model: gemini-2.5-pro
+2025-11-23 19:10:34.484 [info] Base URL (Config): https://aiplatform.googleapis.com/v1/publishers/google/models
+2025-11-23 19:10:34.484 [info] Target URL (Final): https://aiplatform.googleapis.com/v1/projects/gen-lang-client-0031641020/locations/global/publishers/google/models/gemini-2.5-pro:generateContent
+2025-11-23 19:10:34.570 [info] 🧠 Enabling Thinking Config for gemini-2.5-pro
+2025-11-23 19:10:34.572 [info] 🔍 Vertex Request Body: {
   "contents": [
     {
       "role": "user",
@@ -124,5 +126,5 @@
     }
   ]
 }
-2025-11-23 18:29:33.344 [info] ✅ Response Status: 200
-2025-11-23 18:29:33.345 [info] 127.0.0.1 - - [23/Nov/2025 18:29:33] "POST /janitorai HTTP/1.1" 200 -
+2025-11-23 19:10:50.317 [info] ✅ Response Status: 200
+2025-11-23 19:10:50.319 [info] 127.0.0.1 - - [23/Nov/2025 19:10:50] "POST /janitorai HTTP/1.1" 200 -

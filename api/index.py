@@ -651,16 +651,16 @@ def stream_vertex_translation(upstream_response):
         is_thinking = False 
         first_chunk = True
         
-        try:
-            for chunk in upstream_response.iter_content(chunk_size=1024):
-                if not chunk: continue
-                
-                if first_chunk:
-                    print(f"🔍 Vertex Raw Stream Start: {chunk[:500]}")
-                    first_chunk = False
-                
-                buffer += chunk
-                
+            try:
+                print("⚡ Starting Vertex Stream Processing...", flush=True)
+                for chunk in upstream_response.iter_content(chunk_size=None):
+                    if not chunk: continue
+                    
+                    if first_chunk:
+                        print(f"🔍 Vertex Raw Stream Start: {chunk[:500]}", flush=True)
+                        first_chunk = False
+                    
+                    buffer += chunk                
                 while True:
                     try:
                         # Attempt to decode the buffer
