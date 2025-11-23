@@ -569,8 +569,21 @@ def convert_openai_to_vertex(openai_body, model_id):
         ]
     }
 
-    if "gemini-3" in model_id or "thinking" in model_id:
-         vertex_body["generationConfig"]["thinkingConfig"] = {"thinkingLevel": "HIGH"}
+    # Thinking Config (if requested or enabled by default for specific models)
+    # Only enable if the model ID explicitly suggests reasoning capabilities
+    if "thinking" in model_id.lower():
+        t_config = {}
+        
+        # User requested: Budget for 2.5, Level for 3
+        if "2.5" in model_id:
+            t_config["thinkingBudget"] = 8192 # Max supported budget
+        elif "gemini-3" in model_id:
+            t_config["thinkingLevel"] = "HIGH"
+        else:
+            # Default fallback for other thinking models
+            t_config["thinkingLevel"] = "HIGH"
+            
+        vertex_body["generationConfig"]["thinkingConfig"] = t_config
 
     system_instruction = None
     
