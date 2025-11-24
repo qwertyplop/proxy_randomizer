@@ -1,7 +1,6 @@
 ﻿providers.json
 providers.enc
 __pycache__/
-reference_proxy/
 *.pyc
 .env
 .vercel
