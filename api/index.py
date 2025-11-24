@@ -651,6 +651,16 @@ def stream_vertex_translation(upstream_response):
     is_thinking = False 
     first_chunk = True
     
+    # Send initial role chunk (OpenAI Standard)
+    role_data = {
+        "choices": [{
+            "index": 0,
+            "delta": {"role": "assistant", "content": ""},
+            "finish_reason": None
+        }]
+    }
+    yield f"data: {json.dumps(role_data)}\n\n".encode("utf-8")
+    
     try:
         print("⚡ Starting Vertex Stream Processing...", flush=True)
         for chunk in upstream_response.iter_content(chunk_size=None):
