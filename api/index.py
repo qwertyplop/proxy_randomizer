@@ -1085,11 +1085,6 @@ def proxy_request(source_label, upstream_path_suffix):
         excluded_resp_headers = ["content-encoding", "content-length", "transfer-encoding", "connection", "content-type"]
         headers = [(k, v) for k, v in resp.raw.headers.items() if k.lower() not in excluded_resp_headers]
         
-        if should_stream:
-            headers.append(("Content-Type", "text/event-stream"))
-        else:
-            headers.append(("Content-Type", "application/json"))
-        
         headers.append(("X-FunTime-Provider", provider.get("name")))
         headers.append(("X-FunTime-Model", model_config.get("id")))
         headers.append(("X-FunTime-Target", target_url))
@@ -1105,10 +1100,10 @@ def proxy_request(source_label, upstream_path_suffix):
 
         if should_stream:
             
-            # Vertex Response Handling
+            # Vertex Response Handling (Legacy/Unreachable if using handle_vertex_request)
             if is_vertex:
                 # Pass the response object itself, not a generator, so we can check status inside
-                return Response(stream_vertex_translation(resp), resp.status_code, headers)
+                return Response(stream_vertex_translation(resp), resp.status_code, headers, mimetype='text/event-stream')
 
             def generate():
                 for chunk in resp.iter_content(chunk_size=4096):
@@ -1133,7 +1128,7 @@ def proxy_request(source_label, upstream_path_suffix):
             if is_deepseek and resp.status_code == 200:
                 final_generator = stream_deepseek_refinement(final_generator, prefill_used)
 
-            return Response(final_generator, resp.status_code, headers)
+            return Response(stream_with_context(final_generator), resp.status_code, headers, mimetype='text/event-stream')
         else:
             content = resp.content
             
@@ -1154,7 +1149,7 @@ def proxy_request(source_label, upstream_path_suffix):
                 except Exception as e:
                     print(f"⚠️ Failed to refine non-streaming Gemini response: {e}")
             
-            return Response(content, resp.status_code, headers)
+            return Response(content, resp.status_code, headers, mimetype='application/json')
 
     except Exception as e:
         print(f"   ❌ Connection Error: {e}")
