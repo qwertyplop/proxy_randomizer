@@ -1009,8 +1009,13 @@ def proxy_request(source_label, upstream_path_suffix):
             except:
                 pass
         
-        excluded_resp_headers = ["content-encoding", "content-length", "transfer-encoding", "connection"]
+        excluded_resp_headers = ["content-encoding", "content-length", "transfer-encoding", "connection", "content-type"]
         headers = [(k, v) for k, v in resp.raw.headers.items() if k.lower() not in excluded_resp_headers]
+        
+        if should_stream:
+            headers.append(("Content-Type", "text/event-stream"))
+        else:
+            headers.append(("Content-Type", "application/json"))
         
         headers.append(("X-FunTime-Provider", provider.get("name")))
         headers.append(("X-FunTime-Model", model_config.get("id")))
