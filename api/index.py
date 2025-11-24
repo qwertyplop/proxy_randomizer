@@ -813,6 +813,102 @@ def translate_vertex_non_stream(raw_content):
         print(f"❌ Vertex Non-Stream Translation Error: {e}")
         return raw_content # Fallback to raw if parsing fails
 
+def handle_vertex_request(req, provider, model_config):
+    """
+    Specialized handler for Vertex AI that strictly mimics the working Colab debugger logic.
+    """
+    timestamp = datetime.now().isoformat()
+    print(f"\n[{timestamp}] ⚡ VERTEX HANDLER ENGAGED")
+    
+    # 1. Parse Input
+    try:
+        req_body = req.get_json(force=True)
+        is_stream = req_body.get("stream", True)
+    except Exception as e:
+        return jsonify({"error": f"Invalid JSON: {e}"}), 400
+
+    # 2. Authenticate (Service Account Only for now as per our setup)
+    token = get_google_access_token()
+    if not token:
+        return jsonify({"error": "Failed to generate Google Token. Check JSON config."}), 500
+
+    # 3. Translate Body
+    model_id = model_config.get("id")
+    vertex_body = convert_openai_to_vertex(req_body, model_id)
+    
+    # 4. Construct URL
+    # Extract Project ID/Location from SA JSON or Config
+    project_id = ""
+    location = "us-central1" # Default
+    
+    if GOOGLE_SA_JSON:
+        try:
+            sa_info = json.loads(GOOGLE_SA_JSON)
+            project_id = sa_info.get("project_id")
+        except: pass
+        
+    base_url = provider.get("base_url", "")
+    if "global" in base_url: location = "global"
+    elif "us-central1" in base_url: location = "us-central1"
+    elif "europe-west1" in base_url: location = "europe-west1"
+    elif "us-west1" in base_url: location = "us-west1"
+    # Add more regions if needed from config
+    
+    if location == 'global':
+        host = "aiplatform.googleapis.com"
+    else:
+        host = f"{location}-aiplatform.googleapis.com"
+        
+    if is_stream:
+        url = f"https://{host}/v1/projects/{project_id}/locations/{location}/publishers/google/models/{model_id}:streamGenerateContent?alt=sse"
+    else:
+        url = f"https://{host}/v1/projects/{project_id}/locations/{location}/publishers/google/models/{model_id}:generateContent"
+    
+    print(f"   Target URL: {url}")
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    # 5. Send to Vertex
+    try:
+        if is_stream:
+            resp = requests.post(url, headers=headers, json=vertex_body, stream=True, timeout=60)
+            
+            # CORS Headers specifically for this response
+            response_headers = {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Content-Type": "text/event-stream"
+            }
+            
+            return Response(
+                stream_vertex_translation(resp),
+                status=resp.status_code,
+                headers=response_headers
+            )
+        else:
+            resp = requests.post(url, headers=headers, json=vertex_body, stream=False, timeout=60)
+            
+            translated = translate_vertex_non_stream(resp.content)
+            
+            response_headers = {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                "Content-Type": "application/json"
+            }
+            
+            return Response(translated, status=resp.status_code, headers=response_headers)
+
+    except Exception as e:
+        print(f"Vertex Request Failed: {e}")
+        return jsonify({"error": f"Vertex Request Failed: {e}"}), 500
+
 def proxy_request(source_label, upstream_path_suffix):
     timestamp = datetime.now().isoformat()
     
@@ -874,52 +970,8 @@ def proxy_request(source_label, upstream_path_suffix):
     is_vertex = ("vertex" in provider.get("name", "").lower() or "googleapis.com" in base_url) and "/openapi" not in base_url
     
     if is_vertex:
-        # Vertex API Construction
-        model_id = model_config.get("id")
-        api_key = provider.get("api_key")
-        
-        # If using Service Account (AUTO), we MUST use the Project-Scoped Endpoint
-        if api_key == "AUTO" and GOOGLE_SA_JSON:
-            try:
-                sa_info = json.loads(GOOGLE_SA_JSON)
-                project_id = sa_info.get("project_id")
-                
-                # Determine region from base_url or default to us-central1
-                region = "us-central1" # Default fallback
-                host_prefix = "us-central1-aiplatform.googleapis.com" # Default host
-                
-                if "global" in base_url:
-                    region = "global"
-                    host_prefix = "aiplatform.googleapis.com" # Global host
-                elif "aiplatform.googleapis.com" in base_url:
-                    # Check for regional prefix
-                    if "us-central1" in base_url:
-                        region = "us-central1"
-                        host_prefix = "us-central1-aiplatform.googleapis.com"
-                    elif "europe-west1" in base_url: 
-                        region = "europe-west1"
-                        host_prefix = "europe-west1-aiplatform.googleapis.com"
-                    else:
-                        region = "global"
-                        host_prefix = "aiplatform.googleapis.com"
-
-                # Force v1beta1 for newer models just in case, or respect config?
-                version = "v1beta1"
-                if "/v1/" in base_url: version = "v1"
-                
-                # Construct the canonical Project Endpoint
-                api_method = "streamGenerateContent" if should_stream else "generateContent"
-                target_url = f"https://{host_prefix}/{version}/projects/{project_id}/locations/{region}/publishers/google/models/{model_id}:{api_method}"
-                
-            except Exception as e:
-                print(f"⚠️ Failed to construct Project URL from SA: {e}")
-                # Fallback to what was configured
-                api_method = "streamGenerateContent" if should_stream else "generateContent"
-                target_url = f"{base_url}/{model_id}:{api_method}?key={api_key}"
-        else:
-            # Static Key or manual config
-            api_method = "streamGenerateContent" if should_stream else "generateContent"
-            target_url = f"{base_url}/{model_id}:{api_method}?key={api_key}"
+        # Delegate to specialized Vertex Handler (ported from working Colab debugger)
+        return handle_vertex_request(request, provider, model_config)
     
     print(f"\n[{timestamp}] 🚀 ATTEMPTING REQUEST")
     print(f"   Source: {source_label}")
