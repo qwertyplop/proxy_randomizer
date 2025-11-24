@@ -1051,7 +1051,7 @@ def proxy_request(source_label, upstream_path_suffix):
             # Vertex Response Handling
             if is_vertex:
                 # Pass the response object itself, not a generator, so we can check status inside
-                return Response(stream_with_context(stream_vertex_translation(resp)), resp.status_code, headers)
+                return Response(stream_vertex_translation(resp), resp.status_code, headers)
 
             def generate():
                 for chunk in resp.iter_content(chunk_size=4096):
@@ -1074,7 +1074,7 @@ def proxy_request(source_label, upstream_path_suffix):
             if is_deepseek and resp.status_code == 200:
                 final_generator = stream_deepseek_refinement(final_generator, prefill_used)
 
-            return Response(stream_with_context(final_generator), resp.status_code, headers)
+            return Response(final_generator, resp.status_code, headers)
         else:
             content = resp.content
             
