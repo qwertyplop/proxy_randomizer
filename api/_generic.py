@@ -123,7 +123,10 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
         print(f"   ✅ Upstream Status: {resp.status_code}")
         
         # 5. Response Headers
-        excluded_resp_headers = ['content-encoding', 'content-length', 'transfer-encoding', 'connection']
+        excluded_resp_headers = [
+            'content-encoding', 'content-length', 'transfer-encoding', 'connection',
+            'access-control-allow-origin', 'access-control-allow-methods', 'access-control-allow-headers'
+        ]
         resp_headers = [
             (name, value) for (name, value) in resp.raw.headers.items()
             if name.lower() not in excluded_resp_headers
