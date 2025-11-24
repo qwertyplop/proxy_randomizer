@@ -724,7 +724,7 @@ def stream_vertex_translation(upstream_response):
         yield "data: [DONE]\n\n".encode("utf-8")
                         
     except Exception as e:
-        print(f"Vertex Stream Error: {e}")
+        print(f"Vertex Stream Error: {e}", flush=True)
         yield make_sse(f"\n\n**Proxy Stream Exception:** {str(e)}")
         yield "data: [DONE]\n\n".encode("utf-8")
         raise e
