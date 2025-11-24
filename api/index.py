@@ -1015,6 +1015,11 @@ def proxy_request(source_label, upstream_path_suffix):
         headers.append(("X-FunTime-Provider", provider.get("name")))
         headers.append(("X-FunTime-Model", model_config.get("id")))
         headers.append(("X-FunTime-Target", target_url))
+        
+        # Explicitly add CORS headers to streamed response
+        headers.append(("Access-Control-Allow-Origin", "*"))
+        headers.append(("Access-Control-Allow-Methods", "POST, OPTIONS"))
+        headers.append(("Access-Control-Allow-Headers", "Content-Type, Authorization"))
 
         if should_stream:
             
