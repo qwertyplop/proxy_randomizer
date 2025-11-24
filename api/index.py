@@ -1046,6 +1046,10 @@ def proxy_request(source_label, upstream_path_suffix):
         headers.append(("Access-Control-Allow-Origin", "*"))
         headers.append(("Access-Control-Allow-Methods", "POST, OPTIONS"))
         headers.append(("Access-Control-Allow-Headers", "Content-Type, Authorization"))
+        
+        # Prevent buffering
+        headers.append(("Cache-Control", "no-cache"))
+        headers.append(("X-Accel-Buffering", "no"))
 
         if should_stream:
             
