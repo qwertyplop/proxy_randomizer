@@ -722,6 +722,16 @@ def stream_vertex_translation(upstream_response):
         # Ensure thinking is closed at end of stream
         if is_thinking:
              yield make_sse("\n</think>\n")
+        
+        # Send final chunk with finish_reason="stop"
+        final_data = {
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "stop"
+            }]
+        }
+        yield f"data: {json.dumps(final_data)}\n\n".encode("utf-8")
              
         yield "data: [DONE]\n\n".encode("utf-8")
                         
