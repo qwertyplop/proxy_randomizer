@@ -686,6 +686,8 @@ def stream_vertex_translation(upstream_response):
                     obj, idx = decoder.raw_decode(potential_json)
                     total_consumed = start_idx + idx
                     
+                    print(f"✅ Parsed Object. Consumed: {total_consumed} chars", flush=True)
+                    
                     # Process Object
                     candidates = obj.get("candidates", [])
                     if candidates:
