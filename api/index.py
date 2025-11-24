@@ -1128,7 +1128,7 @@ def proxy_request(source_label, upstream_path_suffix):
             if is_deepseek and resp.status_code == 200:
                 final_generator = stream_deepseek_refinement(final_generator, prefill_used)
 
-            return Response(stream_with_context(final_generator), resp.status_code, headers, mimetype='text/event-stream')
+            return Response(final_generator, resp.status_code, headers, mimetype='text/event-stream')
         else:
             content = resp.content
             
