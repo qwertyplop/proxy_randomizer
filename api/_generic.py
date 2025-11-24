@@ -66,6 +66,8 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
         resp_headers.append(("X-FunTime-Provider", provider.get("name")))
         resp_headers.append(("X-FunTime-Model", model_config.get("id")))
         resp_headers.append(("Access-Control-Allow-Origin", "*"))
+        resp_headers.append(("Access-Control-Allow-Methods", "POST, OPTIONS"))
+        resp_headers.append(("Access-Control-Allow-Headers", "Content-Type, Authorization"))
 
         # 5. Handle Response
         # Check if it is actually an event stream

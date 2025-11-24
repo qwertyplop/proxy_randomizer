@@ -27,17 +27,32 @@ CORS(app)
 
 @app.route("/janitorai", methods=["POST", "OPTIONS"])
 def janitor_proxy():
-    if request.method == "OPTIONS": return "", 200
+    if request.method == "OPTIONS":
+        return Response(status=200, headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+        })
     return proxy_dispatcher("janitorai", "/chat/completions")
 
 @app.route("/sillytavern", methods=["POST", "OPTIONS"])
 def sillytavern_proxy():
-    if request.method == "OPTIONS": return "", 200
+    if request.method == "OPTIONS":
+        return Response(status=200, headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+        })
     return proxy_dispatcher("sillytavern", "/chat/completions")
 
 @app.route("/sillytavern/chat/completions", methods=["POST", "OPTIONS"])
 def sillytavern_chat_proxy():
-    if request.method == "OPTIONS": return "", 200
+    if request.method == "OPTIONS":
+        return Response(status=200, headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+        })
     return proxy_dispatcher("sillytavern", "/chat/completions")
 
 @app.route("/sillytavern/models", methods=["GET", "OPTIONS"])
