@@ -1019,7 +1019,7 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
         
         # 5. Prepare Response Headers
         excluded_resp_headers = ["content-encoding", "content-length", "transfer-encoding", "connection", "content-type"]
-        headers = [(k, v) for k, v in resp.raw.headers.items() if k.lower() not in excluded_resp_headers]
+        headers = [(k, v) for k, v in resp.headers.items() if k.lower() not in excluded_resp_headers]
         
         headers.append(("X-FunTime-Provider", provider.get("name")))
         headers.append(("X-FunTime-Model", model_config.get("id")))
