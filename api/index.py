@@ -909,6 +909,142 @@ def handle_vertex_request(req, provider, model_config):
         print(f"Vertex Request Failed: {e}")
         return jsonify({"error": f"Vertex Request Failed: {e}"}), 500
 
+def handle_generic_request(req, provider, model_config, source_label, upstream_path_suffix):
+    timestamp = datetime.now().isoformat()
+    
+    # 1. Base Configuration
+    base_url = provider.get("base_url", "").rstrip("/")
+    target_url = f"{base_url}{upstream_path_suffix}"
+    
+    print(f"\n[{timestamp}] 🚀 GENERIC HANDLER ENGAGED")
+    print(f"   Source: {source_label}")
+    print(f"   Provider: {provider.get('name')} | Model: {model_config.get('id')}")
+    print(f"   Target: {target_url}")
+
+    # 2. Prepare Headers
+    excluded_headers = ["content-length", "host", "origin", "referer", "cookie", "user-agent", "x-forwarded-for", "x-forwarded-host", "accept-encoding", "authorization"]
+    clean_headers = {k: v for k, v in req.headers.items() if k.lower() not in excluded_headers}
+    
+    clean_headers["User-Agent"] = "Mozilla/5.0 (compatible; FunTimeRouter/1.0)"
+    clean_headers["Origin"] = "https://localhost"
+    
+    # Auth Logic
+    p_key = provider.get('api_key', '')
+    if p_key == "AUTO":
+         token = get_google_access_token()
+         if token: p_key = token
+    clean_headers["Authorization"] = f"Bearer {p_key}"
+
+    # 3. Prepare Body & Logic Injection
+    json_body = None
+    data_body = None
+    should_stream = True
+    
+    if req.is_json:
+        try:
+            json_body = req.get_json()
+            should_stream = json_body.get("stream", True)
+            
+            # Update Model ID
+            json_body["model"] = model_config.get("id")
+            
+            # Apply 'settings' from config
+            if "settings" in model_config:
+                for k, v in model_config["settings"].items():
+                    json_body[k] = v
+            
+            # Terminus Thinking
+            if "terminus" in model_config.get("id", "").lower():
+                json_body["chat_template_kwargs"] = {"thinking": True}
+                
+            # JanitorAI Prefill Logic
+            if source_label == "janitorai" and isinstance(json_body.get("messages"), list):
+                enable_prefill = model_config.get("enable_prefill", False)
+                if enable_prefill:
+                    model_id_lower = model_config.get("id", "").lower()
+                    
+                    # System Prompt Injection
+                    system_content = JANITORAI_SYSTEM_PREFILL_CONTENT
+                    if "glm-4" in model_id_lower and "4.5" not in model_id_lower:
+                        system_content = GLM_SYSTEM_PREFILL_CONTENT
+                    elif "magistral" in model_id_lower:
+                        try:
+                            system_content = json.loads(MAGISTRAL_SYSTEM_PREFILL_CONTENT)
+                        except:
+                            system_content = MAGISTRAL_SYSTEM_PREFILL_CONTENT # Fallback if not valid JSON string
+                    
+                    # Inject System Message (if object or string)
+                    if isinstance(system_content, dict):
+                         json_body["messages"].append(system_content)
+                    else:
+                         json_body["messages"].append({"role": "system", "content": system_content})
+
+                    # Assistant Prefill Injection
+                    prefill_text = JANITORAI_PREFILL_CONTENT
+                    if "gemini" in model_id_lower:
+                        prefill_text = GEMINI_PREFILL_CONTENT
+                    
+                    ass_msg = {"role": "assistant", "content": prefill_text}
+                    
+                    if "mistral" in provider.get("base_url", "") or "mistral" in model_id_lower:
+                        ass_msg["prefix"] = True
+                    
+                    json_body["messages"].append(ass_msg)
+                    
+                    # Gemini Additional Tag
+                    if "gemini" in model_id_lower:
+                        json_body["messages"].append({"role": "assistant", "content": GEMINI_PREFILL_ADDITIONAL_CONTENT})
+
+        except Exception as e:
+            print(f"⚠️ JSON Parse/Modify Error: {e}")
+            # Fallback to raw data if modification fails
+            data_body = req.get_data()
+            json_body = None
+    else:
+        data_body = req.get_data()
+
+    # 4. Execute Request
+    try:
+        resp = requests.request(
+            method=req.method,
+            url=target_url,
+            headers=clean_headers,
+            json=json_body,
+            data=data_body,
+            stream=should_stream,
+            timeout=60
+        )
+        
+        print(f"   ✅ Upstream Status: {resp.status_code}")
+        
+        # 5. Prepare Response Headers
+        excluded_resp_headers = ["content-encoding", "content-length", "transfer-encoding", "connection", "content-type"]
+        headers = [(k, v) for k, v in resp.raw.headers.items() if k.lower() not in excluded_resp_headers]
+        
+        headers.append(("X-FunTime-Provider", provider.get("name")))
+        headers.append(("X-FunTime-Model", model_config.get("id")))
+        
+        # CORS & Buffering
+        headers.append(("Access-Control-Allow-Origin", "*"))
+        headers.append(("Access-Control-Allow-Methods", "POST, OPTIONS"))
+        headers.append(("Access-Control-Allow-Headers", "Content-Type, Authorization"))
+        headers.append(("Cache-Control", "no-cache"))
+        headers.append(("X-Accel-Buffering", "no"))
+
+        # 6. Stream Back (PURE STREAMING - No Stripping)
+        if should_stream:
+            def generate():
+                for chunk in resp.iter_content(chunk_size=4096):
+                    if chunk: yield chunk
+            
+            return Response(generate(), resp.status_code, headers, mimetype='text/event-stream')
+        else:
+            return Response(resp.content, resp.status_code, headers, mimetype='application/json')
+
+    except Exception as e:
+        print(f"   ❌ Generic Request Failed: {e}")
+        return jsonify({"error": f"Generic Proxy Error: {str(e)}"}), 500
+
 def proxy_request(source_label, upstream_path_suffix):
     timestamp = datetime.now().isoformat()
     
@@ -917,24 +1053,19 @@ def proxy_request(source_label, upstream_path_suffix):
     
     # Initialize variables early
     json_body = None
-    data_body = None
-    should_stream = True
-    prefill_used = None
-    requested_model_id = None
-
+    
     # Parse Request Body First
     if request.is_json:
         try:
             json_body = request.get_json()
-            # Check stream preference
-            should_stream = json_body.get("stream", True)
             requested_model_id = json_body.get("model")
         except Exception as e:
             print(f"⚠️ Error parsing JSON body: {e}")
+            requested_model_id = None
     else:
-        data_body = request.get_data()
+        requested_model_id = None
 
-    # 2. Pre-scan for Admin Bypass (using parsed model ID)
+    # 2. Pre-scan for Admin Bypass
     incoming_key = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
 
     provider = None
@@ -962,198 +1093,16 @@ def proxy_request(source_label, upstream_path_suffix):
         return jsonify({"error": "Configuration Error: No providers available (Decryption failed or empty list)."}), 500
 
     base_url = provider.get("base_url", "").rstrip("/")
-    target_url = f"{base_url}{upstream_path_suffix}"
     
     # Correct Detection logic:
-    # 1. Provider name or URL implies Vertex/Google
-    # 2. BUT NOT if it is the 'openapi' endpoint (Third-party models on Vertex use OpenAI protocol)
     is_vertex = ("vertex" in provider.get("name", "").lower() or "googleapis.com" in base_url) and "/openapi" not in base_url
     
     if is_vertex:
-        # Delegate to specialized Vertex Handler (ported from working Colab debugger)
+        # Delegate to specialized Vertex Handler
         return handle_vertex_request(request, provider, model_config)
     
-    print(f"\n[{timestamp}] 🚀 ATTEMPTING REQUEST")
-    print(f"   Source: {source_label}")
-    print(f"   Provider: {provider.get('name')} | Model: {model_config.get('id')}")
-    print(f"   Base URL (Config): {base_url}")
-    print(f"   Target URL (Final): {target_url}")
-
-    excluded_headers = ["content-length", "host", "origin", "referer", "cookie", "user-agent", "x-forwarded-for", "x-forwarded-host", "accept-encoding", "authorization"]
-    clean_headers = {k: v for k, v in request.headers.items() if k.lower() not in excluded_headers}
-    
-    clean_headers["User-Agent"] = "Mozilla/5.0 (compatible; FunTimeRouter/1.0)"
-    
-    if is_vertex:
-        # Vertex usually expects Content-Type
-        clean_headers["Content-Type"] = "application/json"
-        if "Authorization" in clean_headers:
-            del clean_headers["Authorization"]
-            
-        # Handle AUTO token for Native Vertex (if using ADC instead of static key)
-        if api_key == "AUTO":
-            token = get_google_access_token()
-            if token:
-                clean_headers["Authorization"] = f"Bearer {token}"
-                # Remove key param from URL since we use Bearer
-                target_url = target_url.replace("?key=AUTO", "").replace("&key=AUTO", "")
-                
-    else:
-        # Standard Provider (including Vertex MAAS)
-        p_key = provider.get('api_key', '')
-        if p_key == "AUTO":
-             token = get_google_access_token()
-             if token:
-                 p_key = token
-                 
-        clean_headers["Authorization"] = f"Bearer {p_key}"
-        
-    clean_headers["Origin"] = "https://localhost"
-
-    # Process Body (if we haven't modified it yet for translation)
-    if json_body: # Already parsed above
-        # We need to reconstruct the body for the request if we are modifying it
-        # The logic below modifies json_body in place or replaces it
-        
-        # Start with the SELECTED model config (if not already set or if changed)
-        json_body["model"] = model_config.get("id")
-        
-        if "terminus" in model_config.get("id", "").lower():
-            json_body["chat_template_kwargs"] = {"thinking": True}
-        
-        if "settings" in model_config:
-            for k, v in model_config["settings"].items():
-                json_body[k] = v
-        
-        if source_label == "janitorai" and isinstance(json_body.get("messages"), list):
-            enable_prefill = model_config.get("enable_prefill", False)
-            if enable_prefill:
-                model_id_lower = model_config.get("id", "").lower()
-                system_content = JANITORAI_SYSTEM_PREFILL_CONTENT
-                
-                if "glm-4" in model_id_lower and "4.5" not in model_id_lower:
-                    system_content = GLM_SYSTEM_PREFILL_CONTENT
-
-                if "magistral" in model_id_lower:
-                        try:
-                            system_msg_obj = json.loads(MAGISTRAL_SYSTEM_PREFILL_CONTENT)
-                            json_body["messages"].append(system_msg_obj)
-                        except:
-                            json_body["messages"].append({"role": "system", "content": MAGISTRAL_SYSTEM_PREFILL_CONTENT})
-                else:
-                    json_body["messages"].append({"role": "system", "content": system_content})
-                
-                prefill_used = JANITORAI_PREFILL_CONTENT
-                
-                if "gemini" in model_id_lower:
-                    prefill_used = GEMINI_PREFILL_CONTENT
-                    
-                ass_msg = {"role": "assistant", "content": prefill_used}
-                
-                is_mistral = "mistral" in provider.get("base_url", "") or "mistral" in model_config.get("id", "")
-                if is_mistral:
-                    ass_msg["prefix"] = True
-                    
-                json_body["messages"].append(ass_msg)
-                
-                if "gemini" in model_id_lower:
-                    json_body["messages"].append({"role": "assistant", "content": GEMINI_PREFILL_ADDITIONAL_CONTENT})
-        
-        # VERTEX TRANSLATION
-        if is_vertex:
-            json_body = convert_openai_to_vertex(json_body, model_config.get("id", ""))
-            print(f"🔍 Vertex Request Body: {json.dumps(json_body, indent=2)}")
-    try:
-        resp = requests.request(
-            method=request.method,
-            url=target_url,
-            headers=clean_headers,
-            json=json_body,
-            data=data_body,
-            stream=should_stream,
-            timeout=60
-        )
-        
-        print(f"   ✅ Response Status: {resp.status_code}")
-        
-        if resp.status_code >= 400:
-            try:
-                print(f"❌ Error Body: {resp.text[:1000]}") # Log first 1000 chars of error
-            except:
-                pass
-        
-        excluded_resp_headers = ["content-encoding", "content-length", "transfer-encoding", "connection", "content-type"]
-        headers = [(k, v) for k, v in resp.raw.headers.items() if k.lower() not in excluded_resp_headers]
-        
-        headers.append(("X-FunTime-Provider", provider.get("name")))
-        headers.append(("X-FunTime-Model", model_config.get("id")))
-        headers.append(("X-FunTime-Target", target_url))
-        
-        # Explicitly add CORS headers to streamed response
-        headers.append(("Access-Control-Allow-Origin", "*"))
-        headers.append(("Access-Control-Allow-Methods", "POST, OPTIONS"))
-        headers.append(("Access-Control-Allow-Headers", "Content-Type, Authorization"))
-        
-        # Prevent buffering
-        headers.append(("Cache-Control", "no-cache"))
-        headers.append(("X-Accel-Buffering", "no"))
-
-        if should_stream:
-            
-            # Vertex Response Handling (Legacy/Unreachable if using handle_vertex_request)
-            if is_vertex:
-                # Pass the response object itself, not a generator, so we can check status inside
-                return Response(stream_vertex_translation(resp), resp.status_code, headers, mimetype='text/event-stream')
-
-            def generate():
-                for chunk in resp.iter_content(chunk_size=4096):
-                    if chunk: 
-                        print(f"GENERIC CHUNK: {len(chunk)} bytes", flush=True)
-                        yield chunk
-            
-            final_generator = generate()
-            
-            is_magistral = "magistral" in model_config.get("id", "").lower()
-            is_deepseek = "deepseek" in model_config.get("id", "").lower()
-            
-            if prefill_used and resp.status_code == 200 and not is_magistral and not is_deepseek and not is_vertex:
-                 final_generator = stream_sse_stripping(final_generator, prefill_used)
-
-            if "gemini" in model_config.get("id", "").lower() and resp.status_code == 200 and not is_vertex:
-                final_generator = stream_gemini_refinement(final_generator)
-            
-            if is_magistral and resp.status_code == 200:
-                final_generator = stream_magistral_refinement(final_generator, prefill_used)
-                
-            if is_deepseek and resp.status_code == 200:
-                final_generator = stream_deepseek_refinement(final_generator, prefill_used)
-
-            return Response(final_generator, resp.status_code, headers, mimetype='text/event-stream')
-        else:
-            content = resp.content
-            
-            if is_vertex and resp.status_code == 200:
-                content = translate_vertex_non_stream(content)
-            
-            # Only apply generic Gemini refinement if NOT Vertex (avoid double tag)
-            if "gemini" in model_config.get("id", "").lower() and resp.status_code == 200 and not is_vertex:
-                try:
-                    # Parse JSON, modify content, re-serialize
-                    body = json.loads(content)
-                    if "choices" in body and len(body["choices"]) > 0:
-                        msg = body["choices"][0].get("message", {})
-                        if "content" in msg and msg["content"]:
-                            new_content = "<think>" + msg["content"].replace("</thought>", "</think>")
-                            body["choices"][0]["message"]["content"] = new_content
-                            content = json.dumps(body).encode("utf-8")
-                except Exception as e:
-                    print(f"⚠️ Failed to refine non-streaming Gemini response: {e}")
-            
-            return Response(content, resp.status_code, headers, mimetype='application/json')
-
-    except Exception as e:
-        print(f"   ❌ Connection Error: {e}")
-        return jsonify({"error": f"Proxy Connection Failed: {str(e)}"}), 500
+    # Delegate to Generic Handler
+    return handle_generic_request(request, provider, model_config, source_label, upstream_path_suffix)
 
 @app.route("/janitorai", methods=["POST", "OPTIONS"])
 def janitor_proxy():

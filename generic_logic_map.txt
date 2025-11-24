@@ -1,0 +1,54 @@
+**Generic Provider Logic & Special Handling**
+
+**Objective:**
+Rewrite the generic provider logic (`proxy_request`) to be cleaner, robust, and simpler, using the proven `handle_vertex_request` patterns.
+
+**Detected Special Handling Rules (from current `api/index.py`):**
+
+1.  **Prompt Injection (Prefill):**
+    *   **Condition:** `source_label == "janitorai"` AND `enable_prefill` in model config.
+    *   **Content:**
+        *   **Default:** `((OOC: Sure, let's proceed!))`
+        *   **Gemini:** `((OOC: Absolutely! ... <thought> ...))`
+    *   **System Prompt:**
+        *   **Default:** `You are a helpful assistant.`
+        *   **GLM-4:** Custom thinking prompt.
+        *   **Magistral:** Custom JSON system object or text.
+    *   **Implementation:** Appends `{"role": "assistant", "content": PREFILL}` to `messages`.
+    *   **Mistral:** If `is_mistral`, sets `prefix=True` on the assistant message (Provider specific feature).
+
+2.  **Stream Modification (Stripping/Refinement):**
+    *   **Prefill Stripping (`stream_sse_stripping`):**
+        *   **Goal:** Remove the injected prefill text from the start of the AI's response so the user doesn't see it repeated.
+        *   **Condition:** `prefill_used` is True AND status 200 AND NOT (Magistral OR Deepseek OR Vertex).
+    *   **Gemini Refinement (`stream_gemini_refinement`):**
+        *   **Goal:** Ensure `<think>` tags are closed/formatted? Or inject initial `<think>`?
+        *   **Condition:** "gemini" in model ID AND status 200 AND NOT Vertex.
+    *   **Magistral Refinement (`stream_magistral_refinement`):**
+        *   **Condition:** "magistral" in model ID.
+    *   **Deepseek Refinement (`stream_deepseek_refinement`):**
+        *   **Condition:** "deepseek" in model ID.
+
+**Handling Plan for New `handle_generic_request`:**
+
+1.  **Base Proxy:**
+    *   Forward Headers (Auth, Content-Type).
+    *   Forward Body (JSON).
+    *   Stream Response (SSE).
+    *   **Critical:** Explicit CORS, `no-cache`, `text/event-stream`.
+
+2.  **Injection Logic (Request Side):**
+    *   Keep this! It modifies the JSON body *before* sending. This is safe and doesn't cause 500s (unless the provider rejects the format).
+    *   We will reimplement the `messages` modification cleanly.
+
+3.  **Stripping Logic (Response Side) - THE DANGER ZONE:**
+    *   **Proposal:** **Disable stripping initially.**
+    *   Why? This is the most likely cause of the 500 errors (parsing chunks, crashing on unexpected formats, buffering).
+    *   **Phase 2:** If we add it back, it must be a robust, non-crashing pass-through that yields *original* chunks if parsing fails.
+
+4.  **Special Models (Magistral/Deepseek):**
+    *   These seem to have custom stream parsers (`stream_deepseek_refinement`).
+    *   **Strategy:** Treat them as "Generic" for now (dumb proxy). If they break without the refinement, we add them back one by one. Most providers work fine without "refinement" (just raw output).
+
+**Next Step:**
+Replace `proxy_request` with a clean implementation that handles **Request Injection** (Prefill) but does **Pure Streaming Response** (No Stripping) to stabilize the connection.
