@@ -1034,7 +1034,7 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
         # 6. Stream Back (PURE STREAMING - No Stripping)
         if should_stream:
             def generate():
-                for chunk in resp.iter_content(chunk_size=4096):
+                for chunk in resp.iter_content(chunk_size=None):
                     if chunk: yield chunk
             
             return Response(generate(), resp.status_code, headers, mimetype='text/event-stream')
