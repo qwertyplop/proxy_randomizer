@@ -749,7 +749,8 @@ def stream_vertex_translation(upstream_response):
         print(f"Vertex Stream Error: {e}", flush=True)
         yield make_sse(f"\n\n**Proxy Stream Exception:** {str(e)}")
         yield "data: [DONE]\n\n".encode("utf-8")
-        raise e
+        # Do not raise e here; we handled it by sending the error to the client.
+        # Raising it would crash the WSGI handler and cause a 500 Error.
 
 def translate_vertex_non_stream(raw_content):
     """
