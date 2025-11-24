@@ -1,0 +1,59 @@
+**Google Vertex AI Integration Analysis**
+
+**Objective:**
+Implement Google Vertex AI as a provider for FunTimeRouter, specifically ensuring compatibility with JanitorAI (which fails) and SillyTavern (which works).
+
+**Observation:**
+We have successfully logged request/response cycles for JanitorAI using a direct Google Colab debugger tunnel to the upstream provider (in this case, likely a standard OpenAI-compatible endpoint for comparison, or the Vertex bridge if that was the target).
+
+**Key Differences & Challenges (Vertex AI vs OpenAI):**
+
+1.  **Endpoint Structure:**
+    *   **OpenAI:** `POST /v1/chat/completions`
+    *   **Vertex AI:** `POST https://{LOCATION}-aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/{LOCATION}/publishers/google/models/{MODEL_ID}:streamGenerateContent` (for streaming) or `:generateContent` (for non-streaming).
+
+2.  **Authentication:**
+    *   **OpenAI:** `Authorization: Bearer sk-...` (API Key)
+    *   **Vertex AI:** Requires OAuth 2.0 Bearer Token generated from a Google Cloud Service Account (JSON key file). The token expires and needs refreshing.
+
+3.  **Request Body Format:**
+    *   **OpenAI:**
+        ```json
+        {
+          "model": "gpt-4",
+          "messages": [{"role": "user", "content": "..."}],
+          "stream": true
+        }
+        ```
+    *   **Vertex AI:**
+        ```json
+        {
+          "contents": [
+            {
+              "role": "user",
+              "parts": [{"text": "..."}]
+            }
+          ],
+          "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": 1024
+          }
+        }
+        ```
+    *   *Note:* Vertex uses `contents` instead of `messages`, `parts` instead of `content`, and different role names (often `user` and `model`, mapping `assistant` -> `model`). `system` instructions are often a separate top-level field or prepended.
+
+4.  **Response Body Format (Streaming):**
+    *   **OpenAI:** Server-Sent Events (SSE) starting with `data:`.
+    *   **Vertex AI:** Returns a JSON array of objects if not streaming, or a specific SSE format that differs slightly in structure (e.g., `candidates[0].content.parts[0].text`).
+
+5.  **JanitorAI Specific Issue (Hypothesis):**
+    *   JanitorAI might be stricter about the SSE format or the initial handshake/headers than SillyTavern.
+    *   **Error 500 in Janitor:** Often implies the proxy crashed or returned a format Janitor's backend couldn't parse, or the request to Vertex failed (e.g., auth error, malformed body).
+    *   **"options /janitorai" vs "post":** We saw `OPTIONS` requests succeeding but `POST` failing or returning 404/500 depending on the setup.
+    *   The `janitor.txt` logs show successful interaction with *an* upstream (likely the Gemini/OpenAI compat one). We need to replicate this success with the *raw* Vertex API by translating the request in `index.py`.
+
+**Action Plan:**
+1.  **Translation Logic:** We need a robust `convert_openai_to_vertex(request_body)` function in `index.py`.
+2.  **Auth Handling:** Ensure `get_google_access_token()` is working and correctly injected into the header.
+3.  **Stream Handling:** The `stream_vertex` function needs to correctly parse Vertex chunks and re-emit them as OpenAI-compatible SSE `data:` chunks.
+4.  **Testing:** We will use the `colab_debugger.py` to point *specifically* to our new Vertex-enabled Vercel endpoint to see exactly what Janitor receives and rejects.
