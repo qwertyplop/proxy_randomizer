@@ -199,10 +199,10 @@ def stream_sse_stripping(upstream_generator, text_to_strip):
     buffer = b""
     accumulated_content = "" 
     check_phase = True 
-    cleanup_needed = False # New flag: Active immediately after match to strip trailing junk
-
     try:
         for chunk in upstream_generator:
+            # LOGGING: Raw chunk
+            # print(f"RAW CHUNK: {chunk[:100]}", flush=True)
             buffer += chunk
             
             while b"\n\n" in buffer:
@@ -273,7 +273,7 @@ def stream_sse_stripping(upstream_generator, text_to_strip):
             
     except Exception as e:
         print(f"Stream Error: {e}")
-        raise e
+        # raise e <--- REMOVED to prevent 500 crashes on partial failures
 
 def stream_gemini_refinement(upstream_generator):
     """
@@ -1112,7 +1112,9 @@ def proxy_request(source_label, upstream_path_suffix):
 
             def generate():
                 for chunk in resp.iter_content(chunk_size=4096):
-                    if chunk: yield chunk
+                    if chunk: 
+                        print(f"GENERIC CHUNK: {len(chunk)} bytes", flush=True)
+                        yield chunk
             
             final_generator = generate()
             
@@ -1131,7 +1133,7 @@ def proxy_request(source_label, upstream_path_suffix):
             if is_deepseek and resp.status_code == 200:
                 final_generator = stream_deepseek_refinement(final_generator, prefill_used)
 
-            return Response(stream_with_context(final_generator), resp.status_code, headers)
+            return Response(final_generator, resp.status_code, headers)
         else:
             content = resp.content
             
