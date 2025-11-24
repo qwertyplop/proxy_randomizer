@@ -839,7 +839,7 @@ def handle_vertex_request(req, provider, model_config):
     # 4. Construct URL
     # Extract Project ID/Location from SA JSON or Config
     project_id = ""
-    location = "us-central1" # Default
+    location = "global" # Default
     
     if GOOGLE_SA_JSON:
         try:
