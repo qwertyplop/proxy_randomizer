@@ -159,8 +159,10 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
         resp_headers.append(("Cache-Control", "no-cache"))
         resp_headers.append(("X-Accel-Buffering", "no"))
 
-        # Magistral Handling
-        is_magistral = "magistral" in model_config.get("id", "").lower() and source_label == "janitorai"
+        # Magistral & DeepSeek Handling
+        model_id_lower = model_config.get("id", "").lower()
+        is_magistral = "magistral" in model_id_lower and source_label == "janitorai"
+        is_deepseek_r1 = ("deepseek" in model_id_lower and "r1" in model_id_lower) and source_label == "janitorai"
 
         # 6. Stream Response
         if should_stream:
@@ -237,6 +239,68 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                             yield decoded_line + "\n"
                         else:
                             yield decoded_line + "\n"
+                elif is_deepseek_r1:
+                    # DeepSeek R1 Streaming Logic (reasoning_content)
+                    is_thinking = False
+                    
+                    for line in resp.iter_lines():
+                        decoded_line = line.decode('utf-8')
+                        if decoded_line.strip():
+                             print(f"🔍 [DEBUG] DeepSeek Stream: {decoded_line}")
+                             
+                        if decoded_line.startswith("data: ") and decoded_line != "data: [DONE]":
+                            try:
+                                json_str = decoded_line[6:]
+                                chunk = json.loads(json_str)
+                                choices = chunk.get("choices", [])
+                                
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    content = delta.get("content", "")
+                                    reasoning = delta.get("reasoning_content", "")
+                                    
+                                    final_content = ""
+                                    
+                                    # Handle Reasoning
+                                    if reasoning:
+                                        if not is_thinking:
+                                            final_content += "<think>"
+                                            is_thinking = True
+                                        final_content += reasoning
+                                    
+                                    # Handle Content (Switch out of thinking if needed)
+                                    if content:
+                                        if is_thinking:
+                                            final_content += "</think>"
+                                            is_thinking = False
+                                        final_content += content
+                                        
+                                    # Update chunk
+                                    chunk["choices"][0]["delta"]["content"] = final_content
+                                    # Remove reasoning_content to avoid client confusion if they don't support it
+                                    if "reasoning_content" in chunk["choices"][0]["delta"]:
+                                        del chunk["choices"][0]["delta"]["reasoning_content"]
+                                        
+                                    yield "data: " + json.dumps(chunk) + "\n"
+                                else:
+                                    yield decoded_line + "\n"
+                            except Exception as e:
+                                print(f"⚠️ DeepSeek Stream Parse Error: {e}")
+                                yield decoded_line + "\n"
+                        elif decoded_line == "data: [DONE]":
+                            if is_thinking:
+                                final_chunk = {
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": {"content": "</think>"},
+                                        "finish_reason": None
+                                    }]
+                                }
+                                yield "data: " + json.dumps(final_chunk) + "\n"
+                                is_thinking = False
+                            yield decoded_line + "\n"
+                        else:
+                            yield decoded_line + "\n"
                 else:
                     # Standard Streaming
                     for chunk in resp.iter_content(chunk_size=4096):
@@ -253,39 +317,60 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
             except:
                 print(f"📝 [DEBUG] Raw Upstream Response (Binary): {len(content)} bytes")
 
-            if is_magistral and resp.status_code == 200:
-                try:
-                    body = resp.json()
-                    choices = body.get("choices", [])
-                    if choices:
-                        msg = choices[0].get("message", {})
-                        inner_content = msg.get("content")
-                        
-                        if isinstance(inner_content, list):
-                            # Transform Magistral Structured Content
-                            final_text = ""
-                            for item in inner_content:
-                                if item.get("type") == "thinking":
-                                    # Extract thinking text
-                                    think_text = ""
-                                    if "thinking" in item and isinstance(item["thinking"], list):
-                                        for t_item in item["thinking"]:
-                                            if t_item.get("type") == "text":
-                                                think_text += t_item.get("text", "")
-                                    elif "thinking" in item and isinstance(item["thinking"], str):
-                                        think_text = item["thinking"]
+            if resp.status_code == 200:
+                if is_magistral:
+                    try:
+                        body = resp.json()
+                        choices = body.get("choices", [])
+                        if choices:
+                            msg = choices[0].get("message", {})
+                            inner_content = msg.get("content")
+                            
+                            if isinstance(inner_content, list):
+                                # Transform Magistral Structured Content
+                                final_text = ""
+                                for item in inner_content:
+                                    if item.get("type") == "thinking":
+                                        # Extract thinking text
+                                        think_text = ""
+                                        if "thinking" in item and isinstance(item["thinking"], list):
+                                            for t_item in item["thinking"]:
+                                                if t_item.get("type") == "text":
+                                                    think_text += t_item.get("text", "")
+                                        elif "thinking" in item and isinstance(item["thinking"], str):
+                                            think_text = item["thinking"]
+                                            
+                                        final_text += f"<think>{think_text}</think>\n"
                                         
-                                    final_text += f"<think>{think_text}</think>\n"
-                                    
-                                elif item.get("type") == "text":
-                                    final_text += item.get("text", "")
+                                    elif item.get("type") == "text":
+                                        final_text += item.get("text", "")
+                                
+                                # Update body
+                                body["choices"][0]["message"]["content"] = final_text
+                                content = json.dumps(body).encode('utf-8')
+                                
+                    except Exception as e:
+                        print(f"⚠️ Failed to transform Magistral response: {e}")
+                
+                elif is_deepseek_r1:
+                    try:
+                        body = resp.json()
+                        choices = body.get("choices", [])
+                        if choices:
+                            msg = choices[0].get("message", {})
+                            content = msg.get("content", "")
+                            reasoning = msg.get("reasoning_content", "")
                             
-                            # Update body
-                            body["choices"][0]["message"]["content"] = final_text
-                            content = json.dumps(body).encode('utf-8')
-                            
-                except Exception as e:
-                    print(f"⚠️ Failed to transform Magistral response: {e}")
+                            if reasoning:
+                                final_text = f"<think>{reasoning}</think>\n{content}"
+                                body["choices"][0]["message"]["content"] = final_text
+                                # Remove reasoning_content
+                                if "reasoning_content" in body["choices"][0]["message"]:
+                                    del body["choices"][0]["message"]["reasoning_content"]
+                                
+                                content = json.dumps(body).encode('utf-8')
+                    except Exception as e:
+                        print(f"⚠️ Failed to transform DeepSeek response: {e}")
             
             return Response(content, resp.status_code, resp_headers)
 
