@@ -167,6 +167,8 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
             def generate():
                 if is_magistral:
                     # Magistral Streaming Logic
+                    is_thinking = False
+
                     for line in resp.iter_lines():
                         decoded_line = line.decode('utf-8')
                         # DEBUG LOGGING: Raw Stream Line
@@ -184,23 +186,29 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                                     content = delta.get("content")
                                     
                                     if isinstance(content, list):
-                                        # Transform Structured Content in Stream
+                                        # Transform Structured Content in Stream (Stateful)
                                         final_text = ""
                                         for item in content:
                                             if item.get("type") == "thinking":
+                                                if not is_thinking:
+                                                    final_text += "<think>"
+                                                    is_thinking = True
+                                                
                                                 think_text = ""
                                                 thinking_content = item.get("thinking")
-                                                
                                                 if isinstance(thinking_content, list):
                                                     for t_item in thinking_content:
                                                         if t_item.get("type") == "text":
                                                             think_text += t_item.get("text", "")
                                                 elif isinstance(thinking_content, str):
                                                     think_text = thinking_content
-                                                    
-                                                final_text += f"<think>{think_text}</think>"
+                                                
+                                                final_text += think_text
                                                 
                                             elif item.get("type") == "text":
+                                                if is_thinking:
+                                                    final_text += "</think>"
+                                                    is_thinking = False
                                                 final_text += item.get("text", "")
                                         
                                         # Update chunk
@@ -214,6 +222,19 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                             except Exception as e:
                                 print(f"⚠️ Stream Parse Error: {e}")
                                 yield decoded_line + "\n"
+                        elif decoded_line == "data: [DONE]":
+                            if is_thinking:
+                                # Close thinking tag if stream ends
+                                final_chunk = {
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": {"content": "</think>"},
+                                        "finish_reason": None
+                                    }]
+                                }
+                                yield "data: " + json.dumps(final_chunk) + "\n"
+                                is_thinking = False
+                            yield decoded_line + "\n"
                         else:
                             yield decoded_line + "\n"
                 else:
