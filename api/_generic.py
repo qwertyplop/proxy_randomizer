@@ -69,27 +69,32 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
 
             # Client-Specific Prefill (JanitorAI)
             if source_label == "janitorai" and "messages" in json_body and isinstance(json_body["messages"], list):
+                model_id_lower = model_config.get("id", "").lower()
                 enable_prefill = model_config.get("enable_prefill", False)
-                
-                if enable_prefill:
-                    model_id_lower = model_config.get("id", "").lower()
-                    
-                    # 1. Determine System Content
-                    system_content = JANITORAI_SYSTEM_PREFILL_CONTENT
-                    if "glm-4" in model_id_lower and "4.5" not in model_id_lower:
-                        system_content = GLM_SYSTEM_PREFILL_CONTENT
-                    elif "magistral" in model_id_lower:
-                        try:
-                            system_content = json.loads(MAGISTRAL_SYSTEM_PREFILL_CONTENT)
-                        except:
-                            system_content = MAGISTRAL_SYSTEM_PREFILL_CONTENT
 
-                    # 2. Inject System Message
-                    print("   💉 Injecting System Prefill")
-                    if isinstance(system_content, dict):
-                         json_body["messages"].append(system_content)
-                    else:
-                         json_body["messages"].append({"role": "system", "content": system_content})
+                # ALWAYS inject Magistral template for JanitorAI, regardless of prefill setting
+                if "magistral" in model_id_lower:
+                     print("   💉 Injecting Magistral Template (Mandatory)")
+                     try:
+                         mag_content = json.loads(MAGISTRAL_SYSTEM_PREFILL_CONTENT)
+                         json_body["messages"].append(mag_content)
+                     except:
+                         json_body["messages"].append({"role": "system", "content": MAGISTRAL_SYSTEM_PREFILL_CONTENT})
+
+                # Handle other prefills (controlled by setting)
+                if enable_prefill:
+                    # 1. Determine System Content (Skip if Magistral, already handled)
+                    if "magistral" not in model_id_lower:
+                        system_content = JANITORAI_SYSTEM_PREFILL_CONTENT
+                        if "glm-4" in model_id_lower and "4.5" not in model_id_lower:
+                            system_content = GLM_SYSTEM_PREFILL_CONTENT
+
+                        # 2. Inject System Message
+                        print("   💉 Injecting System Prefill")
+                        if isinstance(system_content, dict):
+                             json_body["messages"].append(system_content)
+                        else:
+                             json_body["messages"].append({"role": "system", "content": system_content})
 
                     # 3. Determine Assistant Prefill
                     prefill_text = JANITORAI_PREFILL_CONTENT
