@@ -67,7 +67,7 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
             if "terminus" in model_config.get("id", "").lower():
                 json_body["chat_template_kwargs"] = {"thinking": True}
 
-            # Prefill / System Prompt Injection
+            # Client-Specific Prefill (JanitorAI)
             if source_label == "janitorai" and "messages" in json_body and isinstance(json_body["messages"], list):
                 enable_prefill = model_config.get("enable_prefill", False)
                 
@@ -107,32 +107,6 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                     
                     if "gemini" in model_id_lower:
                         json_body["messages"].append({"role": "assistant", "content": GEMINI_PREFILL_ADDITIONAL_CONTENT})
-
-            # Magistral Template Injection
-            if "magistral" in model_config.get("id", "").lower() and "messages" in json_body and isinstance(json_body["messages"], list):
-                print("   💉 Injecting Magistral Template")
-                json_body["messages"].append({
-                    "role": "system",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "# HOW YOU SHOULD THINK AND ANSWER\n\nFirst draft your thinking process (inner monologue) until you arrive at a response. Format your response using Markdown, and use LaTeX for any mathematical equations. Write both your thoughts and the response in the same language as the input.\n\nYour thinking process must follow the template below:"
-                        },
-                        {
-                            "type": "thinking",
-                            "thinking": [
-                                {
-                                    "type": "text",
-                                    "text": "Your thoughts or/and draft, like working through an exercise on scratch paper. Be as casual and as long as you want until you are confident to generate the response to the user."
-                                }
-                            ]
-                        },
-                        {
-                            "type": "text",
-                            "text": "Here, provide a self-contained response."
-                        }
-                    ]
-                })
 
         except Exception as e:
             print(f"⚠️ Failed to process/inject body: {e}")
@@ -175,7 +149,7 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
         resp_headers.append(("X-Accel-Buffering", "no"))
 
         # Magistral Handling
-        is_magistral = "magistral" in model_config.get("id", "").lower()
+        is_magistral = "magistral" in model_config.get("id", "").lower() and source_label == "janitorai"
 
         # 6. Stream Response
         if should_stream:
