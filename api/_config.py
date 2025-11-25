@@ -19,6 +19,11 @@ CONFIG_URL = os.getenv("CONFIG_URL", "")
 CONFIG_PASSWORD = os.getenv("CONFIG_PASSWORD", "")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 GOOGLE_SA_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+IGNORED_PROVIDERS_JSON = os.getenv("IGNORED_PROVIDERS", "[]")
+try:
+    IGNORED_PROVIDERS = json.loads(IGNORED_PROVIDERS_JSON)
+except:
+    IGNORED_PROVIDERS = []
 
 # Prefill Content
 JANITORAI_PREFILL_CONTENT = os.getenv("JANITORAI_PREFILL_CONTENT", "((OOC: Sure, let's proceed!))")
@@ -119,6 +124,10 @@ def load_providers():
 def select_random_provider(providers):
     choices = []
     for provider in providers:
+        p_name = provider.get("name", "")
+        if p_name in IGNORED_PROVIDERS:
+            continue
+            
         if "models" in provider:
             for model in provider["models"]:
                 choices.append((provider, model))
