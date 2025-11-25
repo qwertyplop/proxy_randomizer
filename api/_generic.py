@@ -162,7 +162,10 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
         # Magistral & DeepSeek Handling
         model_id_lower = model_config.get("id", "").lower()
         is_magistral = "magistral" in model_id_lower and source_label == "janitorai"
-        is_deepseek_r1 = ("deepseek" in model_id_lower and "r1" in model_id_lower) and source_label == "janitorai"
+        is_deepseek_reasoning = (
+            ("deepseek" in model_id_lower and "r1" in model_id_lower) or
+            ("terminus" in model_id_lower)
+        ) and source_label == "janitorai"
 
         # 6. Stream Response
         if should_stream:
@@ -239,8 +242,8 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                             yield decoded_line + "\n"
                         else:
                             yield decoded_line + "\n"
-                elif is_deepseek_r1:
-                    # DeepSeek R1 Streaming Logic (reasoning_content)
+                elif is_deepseek_reasoning:
+                    # DeepSeek Reasoning Streaming Logic (reasoning_content)
                     is_thinking = False
                     
                     for line in resp.iter_lines():
@@ -352,7 +355,7 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                     except Exception as e:
                         print(f"⚠️ Failed to transform Magistral response: {e}")
                 
-                elif is_deepseek_r1:
+                elif is_deepseek_reasoning:
                     try:
                         body = resp.json()
                         choices = body.get("choices", [])
