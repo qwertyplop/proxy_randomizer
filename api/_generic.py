@@ -1,5 +1,6 @@
 import json
 import requests
+import random
 from datetime import datetime
 from flask import Response, jsonify, stream_with_context
 from ._utils import get_google_access_token
@@ -32,7 +33,13 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
     clean_headers["User-Agent"] = "Mozilla/5.0 (compatible; FunTimeRouter/1.0)"
 
     # Auth Logic
-    p_key = provider.get('api_key', '')
+    p_key_config = provider.get('api_key', '')
+    
+    if isinstance(p_key_config, list) and p_key_config:
+        p_key = random.choice(p_key_config)
+    else:
+        p_key = p_key_config
+
     if p_key == "AUTO":
          token = get_google_access_token()
          if token: p_key = token

@@ -318,8 +318,14 @@ def catch_all(path):
     # IGNORE the path from the incoming request because we are hitting a specific endpoint
     target_url = UPSTREAM_URL
     
-    # Filter headers to avoid conflicts (e.g. Host)
-    headers = {k: v for k, v in request.headers if k.lower() not in ['host', 'content-length']}
+    # Filter headers to avoid conflicts and strip identity
+    excluded_headers = [
+        'host', 'content-length', 'origin', 'referer', 'user-agent', 
+        'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto',
+        'forwarded', 'via'
+    ]
+    headers = {k: v for k, v in request.headers if k.lower() not in excluded_headers}
+    headers["User-Agent"] = "Mozilla/5.0 (compatible; ColabProxy/1.0)"
     
     # Log Incoming
     log_request(path, request.method, headers, request.get_data())

@@ -106,10 +106,12 @@ def proxy_dispatcher(source_label, upstream_path_suffix):
         return jsonify({"error": "Configuration Error: No providers available."}), 500
 
     base_url = provider.get("base_url", "")
+    provider_name = provider.get("name", "").lower()
     
     # 5. Routing Logic
+
     # Vertex Detection
-    is_vertex = ("vertex" in provider.get("name", "").lower() or "googleapis.com" in base_url) and "/openapi" not in base_url
+    is_vertex = ("vertex" in provider_name or "googleapis.com" in base_url) and "/openapi" not in base_url
     
     if is_vertex:
         return handle_vertex_request(request, provider, model_config)
