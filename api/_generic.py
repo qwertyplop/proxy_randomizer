@@ -116,6 +116,12 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
 
     # 4. Forward Request
     try:
+        # DEBUG LOGGING: Request Body
+        if json_body:
+            print(f"📝 [DEBUG] Outgoing Request Body:\n{json.dumps(json_body, indent=2)}")
+        elif data_body:
+            print(f"📝 [DEBUG] Outgoing Request Data: {data_body[:500]}...")
+
         resp = requests.request(
             method=req.method,
             url=target_url,
@@ -158,6 +164,10 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                     # Magistral Streaming Logic
                     for line in resp.iter_lines():
                         decoded_line = line.decode('utf-8')
+                        # DEBUG LOGGING: Raw Stream Line
+                        if decoded_line.strip():
+                             print(f"🔍 [DEBUG] Stream Line: {decoded_line}")
+
                         if decoded_line.startswith("data: ") and decoded_line != "data: [DONE]":
                             try:
                                 json_str = decoded_line[6:]  # Remove "data: "
@@ -211,6 +221,12 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
             # Non-Streaming
             content = resp.content
             
+            # DEBUG LOGGING: Raw Response
+            try:
+                print(f"📝 [DEBUG] Raw Upstream Response:\n{content.decode('utf-8')}")
+            except:
+                print(f"📝 [DEBUG] Raw Upstream Response (Binary): {len(content)} bytes")
+
             if is_magistral and resp.status_code == 200:
                 try:
                     body = resp.json()
