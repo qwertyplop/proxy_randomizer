@@ -110,7 +110,7 @@ def stream_vertex_translation(upstream_response):
             if not chunk: continue
             
             # DEBUG LOGGING
-            print(f"📝 [DEBUG] Vertex Stream Raw Chunk: {chunk}")
+            print(f"📝 [DEBUG] Vertex Stream Raw Chunk: {chunk}", flush=True)
             
             if first_chunk:
                 print(f"🔍 Vertex Raw Stream Start: {chunk[:500]}", flush=True)
@@ -197,7 +197,7 @@ def translate_vertex_non_stream(raw_content):
     """
     try:
         # DEBUG LOGGING
-        print(f"📝 [DEBUG] Vertex Raw Response: {raw_content.decode('utf-8', errors='ignore')}")
+        print(f"📝 [DEBUG] Vertex Raw Response: {raw_content.decode('utf-8', errors='ignore')}", flush=True)
         
         data = json.loads(raw_content)
         
@@ -338,5 +338,5 @@ def handle_vertex_request(req, provider, model_config):
             return Response(translated, status=resp.status_code, headers=response_headers)
 
     except Exception as e:
-        print(f"Vertex Request Failed: {e}")
+        print(f"Vertex Request Failed: {e}", flush=True)
         return jsonify({"error": f"Vertex Request Failed: {e}"}), 500
