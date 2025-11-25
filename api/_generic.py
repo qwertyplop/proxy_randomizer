@@ -72,7 +72,7 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                 model_id_lower = model_config.get("id", "").lower()
                 enable_prefill = model_config.get("enable_prefill", False)
 
-                # ALWAYS inject Magistral template for JanitorAI, regardless of prefill setting
+                # ALWAYS inject Magistral template for JanitorAI
                 if "magistral" in model_id_lower:
                      print("   💉 Injecting Magistral Template (Mandatory)")
                      try:
@@ -81,14 +81,17 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                      except:
                          json_body["messages"].append({"role": "system", "content": MAGISTRAL_SYSTEM_PREFILL_CONTENT})
 
+                # ALWAYS inject GLM template for JanitorAI
+                elif "glm-4" in model_id_lower and "4.5" not in model_id_lower:
+                     print("   💉 Injecting GLM Template (Mandatory)")
+                     json_body["messages"].append({"role": "system", "content": GLM_SYSTEM_PREFILL_CONTENT})
+
                 # Handle other prefills (controlled by setting)
                 if enable_prefill:
-                    # 1. Determine System Content (Skip if Magistral, already handled)
-                    if "magistral" not in model_id_lower:
+                    # 1. Determine System Content (Skip if Magistral/GLM, already handled)
+                    if "magistral" not in model_id_lower and not ("glm-4" in model_id_lower and "4.5" not in model_id_lower):
                         system_content = JANITORAI_SYSTEM_PREFILL_CONTENT
-                        if "glm-4" in model_id_lower and "4.5" not in model_id_lower:
-                            system_content = GLM_SYSTEM_PREFILL_CONTENT
-
+                        
                         # 2. Inject System Message
                         print("   💉 Injecting System Prefill")
                         if isinstance(system_content, dict):
@@ -159,13 +162,18 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
         resp_headers.append(("Cache-Control", "no-cache"))
         resp_headers.append(("X-Accel-Buffering", "no"))
 
-        # Magistral & DeepSeek Handling
+        # Magistral, DeepSeek & GLM Handling
         model_id_lower = model_config.get("id", "").lower()
         is_magistral = "magistral" in model_id_lower and source_label == "janitorai"
+        
         is_deepseek_reasoning = (
             ("deepseek" in model_id_lower and "r1" in model_id_lower) or
             ("terminus" in model_id_lower)
         ) and source_label == "janitorai"
+        
+        is_glm_reasoning = ("glm" in model_id_lower) and source_label == "janitorai"
+        
+        is_generic_reasoning = is_deepseek_reasoning or is_glm_reasoning
 
         # 6. Stream Response
         if should_stream:
@@ -242,14 +250,14 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                             yield decoded_line + "\n"
                         else:
                             yield decoded_line + "\n"
-                elif is_deepseek_reasoning:
-                    # DeepSeek Reasoning Streaming Logic (reasoning_content)
+                elif is_generic_reasoning:
+                    # Generic Reasoning Streaming Logic (reasoning_content OR reasoning)
                     is_thinking = False
                     
                     for line in resp.iter_lines():
                         decoded_line = line.decode('utf-8')
                         if decoded_line.strip():
-                             print(f"🔍 [DEBUG] DeepSeek Stream: {decoded_line}")
+                             print(f"🔍 [DEBUG] Reasoning Stream: {decoded_line}")
                              
                         if decoded_line.startswith("data: ") and decoded_line != "data: [DONE]":
                             try:
@@ -260,7 +268,9 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                                 if choices:
                                     delta = choices[0].get("delta", {})
                                     content = delta.get("content", "")
-                                    reasoning = delta.get("reasoning_content", "")
+                                    
+                                    # Support both DeepSeek's "reasoning_content" and GLM's "reasoning"
+                                    reasoning = delta.get("reasoning_content", "") or delta.get("reasoning", "")
                                     
                                     final_content = ""
                                     
@@ -280,15 +290,18 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                                         
                                     # Update chunk
                                     chunk["choices"][0]["delta"]["content"] = final_content
-                                    # Remove reasoning_content to avoid client confusion if they don't support it
+                                    
+                                    # Clean up original reasoning fields
                                     if "reasoning_content" in chunk["choices"][0]["delta"]:
                                         del chunk["choices"][0]["delta"]["reasoning_content"]
+                                    if "reasoning" in chunk["choices"][0]["delta"]:
+                                        del chunk["choices"][0]["delta"]["reasoning"]
                                         
                                     yield "data: " + json.dumps(chunk) + "\n"
                                 else:
                                     yield decoded_line + "\n"
                             except Exception as e:
-                                print(f"⚠️ DeepSeek Stream Parse Error: {e}")
+                                print(f"⚠️ Reasoning Stream Parse Error: {e}")
                                 yield decoded_line + "\n"
                         elif decoded_line == "data: [DONE]":
                             if is_thinking:
@@ -355,25 +368,29 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                     except Exception as e:
                         print(f"⚠️ Failed to transform Magistral response: {e}")
                 
-                elif is_deepseek_reasoning:
+                elif is_generic_reasoning:
                     try:
                         body = resp.json()
                         choices = body.get("choices", [])
                         if choices:
                             msg = choices[0].get("message", {})
                             content = msg.get("content", "")
-                            reasoning = msg.get("reasoning_content", "")
+                            # Support both fields
+                            reasoning = msg.get("reasoning_content", "") or msg.get("reasoning", "")
                             
                             if reasoning:
                                 final_text = f"<think>{reasoning}</think>\n{content}"
                                 body["choices"][0]["message"]["content"] = final_text
-                                # Remove reasoning_content
+                                
+                                # Clean up fields
                                 if "reasoning_content" in body["choices"][0]["message"]:
                                     del body["choices"][0]["message"]["reasoning_content"]
+                                if "reasoning" in body["choices"][0]["message"]:
+                                    del body["choices"][0]["message"]["reasoning"]
                                 
                                 content = json.dumps(body).encode('utf-8')
                     except Exception as e:
-                        print(f"⚠️ Failed to transform DeepSeek response: {e}")
+                        print(f"⚠️ Failed to transform Reasoning response: {e}")
             
             return Response(content, resp.status_code, resp_headers)
 
