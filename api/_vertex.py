@@ -25,8 +25,8 @@ def convert_openai_to_vertex(openai_body, model_id):
         ]
     }
 
-    # Thinking Config (enabled by default for all Gemini models on Vertex)
-    if "gemini" in model_id.lower():
+    # Thinking Config (if requested or enabled by default for specific models)
+    if "thinking" in model_id.lower() or "gemini-3" in model_id.lower() or "2.5" in model_id.lower():
         print(f"🧠 Enabling Thinking Config for {model_id}")
         t_config = {"includeThoughts": True}
         
@@ -36,8 +36,7 @@ def convert_openai_to_vertex(openai_body, model_id):
         elif "gemini-3" in model_id:
             t_config["thinkingLevel"] = "HIGH"
         else:
-            # Default for other Gemini models if they support it
-            pass
+            t_config["thinkingLevel"] = "HIGH"
             
         vertex_body["generationConfig"]["thinkingConfig"] = t_config
 
