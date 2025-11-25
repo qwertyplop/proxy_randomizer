@@ -109,6 +109,9 @@ def stream_vertex_translation(upstream_response):
         for chunk in upstream_response.iter_content(chunk_size=None):
             if not chunk: continue
             
+            # DEBUG LOGGING
+            print(f"📝 [DEBUG] Vertex Stream Raw Chunk: {chunk}")
+            
             if first_chunk:
                 print(f"🔍 Vertex Raw Stream Start: {chunk[:500]}", flush=True)
                 first_chunk = False
@@ -193,6 +196,9 @@ def translate_vertex_non_stream(raw_content):
     Translates a full Vertex AI response JSON to OpenAI Chat Completion JSON.
     """
     try:
+        # DEBUG LOGGING
+        print(f"📝 [DEBUG] Vertex Raw Response: {raw_content.decode('utf-8', errors='ignore')}")
+        
         data = json.loads(raw_content)
         
         full_text = ""
