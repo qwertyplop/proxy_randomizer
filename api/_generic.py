@@ -148,16 +148,104 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
         resp_headers.append(("Cache-Control", "no-cache"))
         resp_headers.append(("X-Accel-Buffering", "no"))
 
+        # Magistral Handling
+        is_magistral = "magistral" in model_config.get("id", "").lower()
+
         # 6. Stream Response
         if should_stream:
             def generate():
-                # Reference uses 4096. We'll stick to 4096 to match reference exactly as requested.
-                for chunk in resp.iter_content(chunk_size=4096):
-                    if chunk: yield chunk
+                if is_magistral:
+                    # Magistral Streaming Logic
+                    for line in resp.iter_lines():
+                        decoded_line = line.decode('utf-8')
+                        if decoded_line.startswith("data: ") and decoded_line != "data: [DONE]":
+                            try:
+                                json_str = decoded_line[6:]  # Remove "data: "
+                                chunk = json.loads(json_str)
+                                choices = chunk.get("choices", [])
+                                
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    content = delta.get("content")
+                                    
+                                    if isinstance(content, list):
+                                        # Transform Structured Content in Stream
+                                        final_text = ""
+                                        for item in content:
+                                            if item.get("type") == "thinking":
+                                                think_text = ""
+                                                thinking_content = item.get("thinking")
+                                                
+                                                if isinstance(thinking_content, list):
+                                                    for t_item in thinking_content:
+                                                        if t_item.get("type") == "text":
+                                                            think_text += t_item.get("text", "")
+                                                elif isinstance(thinking_content, str):
+                                                    think_text = thinking_content
+                                                    
+                                                final_text += f"<think>{think_text}</think>"
+                                                
+                                            elif item.get("type") == "text":
+                                                final_text += item.get("text", "")
+                                        
+                                        # Update chunk
+                                        chunk["choices"][0]["delta"]["content"] = final_text
+                                        new_line = "data: " + json.dumps(chunk)
+                                        yield new_line + "\n"
+                                    else:
+                                        yield decoded_line + "\n"
+                                else:
+                                    yield decoded_line + "\n"
+                            except Exception as e:
+                                print(f"⚠️ Stream Parse Error: {e}")
+                                yield decoded_line + "\n"
+                        else:
+                            yield decoded_line + "\n"
+                else:
+                    # Standard Streaming
+                    for chunk in resp.iter_content(chunk_size=4096):
+                        if chunk: yield chunk
 
             return Response(stream_with_context(generate()), resp.status_code, resp_headers)
         else:
-            return Response(resp.content, resp.status_code, resp_headers)
+            # Non-Streaming
+            content = resp.content
+            
+            if is_magistral and resp.status_code == 200:
+                try:
+                    body = resp.json()
+                    choices = body.get("choices", [])
+                    if choices:
+                        msg = choices[0].get("message", {})
+                        inner_content = msg.get("content")
+                        
+                        if isinstance(inner_content, list):
+                            # Transform Magistral Structured Content
+                            final_text = ""
+                            for item in inner_content:
+                                if item.get("type") == "thinking":
+                                    # Extract thinking text
+                                    think_text = ""
+                                    if "thinking" in item and isinstance(item["thinking"], list):
+                                        for t_item in item["thinking"]:
+                                            if t_item.get("type") == "text":
+                                                think_text += t_item.get("text", "")
+                                    elif "thinking" in item and isinstance(item["thinking"], str):
+                                        think_text = item["thinking"]
+                                        
+                                    final_text += f"<think>{think_text}</think>\n"
+                                    
+                                elif item.get("type") == "text":
+                                    final_text += item.get("text", "")
+                            
+                            # Update body
+                            body["choices"][0]["message"]["content"] = final_text
+                            content = json.dumps(body).encode('utf-8')
+                            
+                except Exception as e:
+                    print(f"⚠️ Failed to transform Magistral response: {e}")
+            
+            return Response(content, resp.status_code, resp_headers)
 
     except Exception as e:
         print(f"   ❌ Generic Request Failed: {e}")
