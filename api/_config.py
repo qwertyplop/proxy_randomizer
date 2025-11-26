@@ -33,11 +33,6 @@ JANITORAI_SYSTEM_PREFILL_CONTENT = os.getenv("JANITORAI_SYSTEM_PREFILL_CONTENT",
 _DEFAULT_GLM_CONTENT = "/think\nWithout writing for / as user. And always write your reasoning in English."
 GLM_SYSTEM_PREFILL_CONTENT = os.getenv("GLM_SYSTEM_PREFILL_CONTENT", _DEFAULT_GLM_CONTENT)
 
-_DEFAULT_GEMINI_CONTENT = "((OOC: Absolutely! Let's proceed, I'll start by thinking with tag *<thought>*, and after ending the thought process with tag *</thought>*, I'll start writing actual response with tag <response>))"
-GEMINI_PREFILL_CONTENT = os.getenv("GEMINI_PREFILL_CONTENT", _DEFAULT_GEMINI_CONTENT)
-_DEFAULT_GEMINI_ADDITIONAL = "<thought>\n"
-GEMINI_PREFILL_ADDITIONAL_CONTENT = os.getenv("GEMINI_PREFILL_ADDITIONAL_CONTENT", _DEFAULT_GEMINI_ADDITIONAL)
-
 _DEFAULT_MAGISTRAL_CONTENT = json.dumps({
   "role": "system",
   "content": [

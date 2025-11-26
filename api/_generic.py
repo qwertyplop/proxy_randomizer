@@ -6,8 +6,7 @@ from flask import Response, jsonify, stream_with_context
 from ._utils import get_google_access_token
 from ._config import (
     JANITORAI_PREFILL_CONTENT, JANITORAI_SYSTEM_PREFILL_CONTENT,
-    GLM_SYSTEM_PREFILL_CONTENT, GEMINI_PREFILL_CONTENT,
-    GEMINI_PREFILL_ADDITIONAL_CONTENT, MAGISTRAL_SYSTEM_PREFILL_CONTENT
+    GLM_SYSTEM_PREFILL_CONTENT, MAGISTRAL_SYSTEM_PREFILL_CONTENT
 )
 
 def handle_generic_request(req, provider, model_config, source_label, upstream_path_suffix):
@@ -101,8 +100,6 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
 
                     # 3. Determine Assistant Prefill
                     prefill_text = JANITORAI_PREFILL_CONTENT
-                    if "gemini" in model_id_lower:
-                        prefill_text = GEMINI_PREFILL_CONTENT
                     
                     ass_msg = {"role": "assistant", "content": prefill_text}
                     
@@ -112,9 +109,6 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                     # 4. Inject Assistant Prefill
                     print("   💉 Injecting Assistant Prefill")
                     json_body["messages"].append(ass_msg)
-                    
-                    if "gemini" in model_id_lower:
-                        json_body["messages"].append({"role": "assistant", "content": GEMINI_PREFILL_ADDITIONAL_CONTENT})
 
         except Exception as e:
             print(f"⚠️ Failed to process/inject body: {e}")
