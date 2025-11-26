@@ -114,7 +114,7 @@ def proxy_dispatcher(source_label, upstream_path_suffix):
     is_vertex = ("vertex" in provider_name or "googleapis.com" in base_url) and "/openapi" not in base_url
     
     if is_vertex:
-        return handle_vertex_request(request, provider, model_config)
+        return handle_vertex_request(request, provider, model_config, source_label)
     
     # Generic Handler (Everything else)
     return handle_generic_request(request, provider, model_config, source_label, upstream_path_suffix)

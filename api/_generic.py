@@ -162,23 +162,29 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
         resp_headers.append(("Cache-Control", "no-cache"))
         resp_headers.append(("X-Accel-Buffering", "no"))
 
-        # Magistral, DeepSeek & GLM Handling
+        # Model-specific Handling Flags
         model_id_lower = model_config.get("id", "").lower()
-        is_magistral = "magistral" in model_id_lower and source_label == "janitorai"
         
-        is_deepseek_reasoning = (
+        # --- Flags for JanitorAI-specific transformations ---
+        is_magistral_janitor = "magistral" in model_id_lower and source_label == "janitorai"
+        
+        is_deepseek_reasoning_janitor = (
             ("deepseek" in model_id_lower and "r1" in model_id_lower) or
             ("terminus" in model_id_lower)
         ) and source_label == "janitorai"
         
-        is_glm_reasoning = ("glm" in model_id_lower) and source_label == "janitorai"
+        is_glm_reasoning_janitor = ("glm" in model_id_lower) and source_label == "janitorai"
         
-        is_generic_reasoning = is_deepseek_reasoning or is_glm_reasoning
+        # Kimi, Qwen and other generic reasoning models for JanitorAI
+        is_other_reasoning_janitor = ("thinking" in model_id_lower) and source_label == "janitorai"
+        
+        # Combined flag for any model that needs reasoning transformation for JanitorAI
+        needs_janitor_reasoning_transform = is_deepseek_reasoning_janitor or is_glm_reasoning_janitor or is_other_reasoning_janitor
 
         # 6. Stream Response
         if should_stream:
             def generate():
-                if is_magistral:
+                if is_magistral_janitor:
                     # Magistral Streaming Logic
                     is_thinking = False
 
@@ -250,8 +256,8 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                             yield decoded_line + "\n"
                         else:
                             yield decoded_line + "\n"
-                elif is_generic_reasoning:
-                    # Generic Reasoning Streaming Logic (reasoning_content OR reasoning)
+                elif needs_janitor_reasoning_transform:
+                    # Generic Reasoning Streaming Logic for JanitorAI
                     is_thinking = False
                     
                     for line in resp.iter_lines():
@@ -334,7 +340,7 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                 print(f"📝 [DEBUG] Raw Upstream Response (Binary): {len(content)} bytes")
 
             if resp.status_code == 200:
-                if is_magistral:
+                if is_magistral_janitor:
                     try:
                         body = resp.json()
                         choices = body.get("choices", [])
@@ -368,7 +374,7 @@ def handle_generic_request(req, provider, model_config, source_label, upstream_p
                     except Exception as e:
                         print(f"⚠️ Failed to transform Magistral response: {e}")
                 
-                elif is_generic_reasoning:
+                elif needs_janitor_reasoning_transform:
                     try:
                         body = resp.json()
                         choices = body.get("choices", [])

@@ -68,10 +68,16 @@ def convert_openai_to_vertex(openai_body, model_id):
         
     return vertex_body
 
-def stream_vertex_translation(upstream_response):
+def stream_vertex_translation(upstream_response, source_label="", model_id=""):
     """
     Translates Vertex AI's JSON stream (array of objects) to OpenAI SSE format.
     """
+    # Kimi/Qwen on Vertex seem to use a different reasoning field
+    # We only want to transform this for JanitorAI, SillyTavern handles it.
+    is_reasoning_model_janitor = (
+        "kimi" in model_id or "qwen" in model_id
+    ) and source_label == "janitorai"
+
     def make_sse(content):
         data = {
             "choices": [{
@@ -142,25 +148,42 @@ def stream_vertex_translation(upstream_response):
                     
                     print(f"✅ Parsed Object. Consumed: {total_consumed} chars", flush=True)
                     
-                    candidates = obj.get("candidates", [])
-                    if candidates:
-                        cand = candidates[0]
-                        parts = cand.get("content", {}).get("parts", [])
-                        
-                        for part in parts:
-                            text = part.get("text", "")
-                            is_thought_part = part.get("thought", False)
+                    if is_reasoning_model_janitor:
+                        # Handle Kimi/Qwen/etc reasoning_content for JanitorAI
+                        reasoning = obj.get("reasoning_content", "")
+                        if reasoning:
+                             if not is_thinking:
+                                 yield make_sse("<think>")
+                                 is_thinking = True
+                             yield make_sse(reasoning)
+
+                        content = obj.get("content", "")
+                        if content:
+                            if is_thinking:
+                                yield make_sse("</think>")
+                                is_thinking = False
+                            yield make_sse(content)
+                    else:
+                        # Standard Vertex `thought` field handling
+                        candidates = obj.get("candidates", [])
+                        if candidates:
+                            cand = candidates[0]
+                            parts = cand.get("content", {}).get("parts", [])
                             
-                            if is_thought_part:
-                                if not is_thinking:
-                                    yield make_sse("<think>\n")
-                                    is_thinking = True
-                                yield make_sse(text)
-                            else:
-                                if is_thinking:
-                                    yield make_sse("\n</think>\n")
-                                    is_thinking = False
-                                yield make_sse(text)
+                            for part in parts:
+                                text = part.get("text", "")
+                                is_thought_part = part.get("thought", False)
+                                
+                                if is_thought_part:
+                                    if not is_thinking:
+                                        yield make_sse("<think>\n")
+                                        is_thinking = True
+                                    yield make_sse(text)
+                                else:
+                                    if is_thinking:
+                                        yield make_sse("\n</think>\n")
+                                        is_thinking = False
+                                    yield make_sse(text)
                                 
                     if "error" in obj:
                          err_msg = json.dumps(obj["error"])
@@ -191,7 +214,7 @@ def stream_vertex_translation(upstream_response):
         yield make_sse(f"\n\n**Proxy Stream Exception:** {str(e)}")
         yield "data: [DONE]\n\n".encode("utf-8")
 
-def translate_vertex_non_stream(raw_content):
+def translate_vertex_non_stream(raw_content, source_label="", model_id=""):
     """
     Translates a full Vertex AI response JSON to OpenAI Chat Completion JSON.
     """
@@ -200,31 +223,45 @@ def translate_vertex_non_stream(raw_content):
         print(f"📝 [DEBUG] Vertex Raw Response: {raw_content.decode('utf-8', errors='ignore')}", flush=True)
         
         data = json.loads(raw_content)
-        
-        full_text = ""
-        candidates = data.get("candidates", [])
-        if candidates:
-            cand = candidates[0]
-            parts = cand.get("content", {}).get("parts", [])
-            
-            is_thinking = False
-            for part in parts:
-                text = part.get("text", "")
-                is_thought_part = part.get("thought", False)
+
+        is_reasoning_model_janitor = (
+            "kimi" in model_id or "qwen" in model_id
+        ) and source_label == "janitorai"
+
+        if is_reasoning_model_janitor:
+            # Handle Kimi/Qwen non-streaming for JanitorAI
+            reasoning = data.get("reasoning_content", "")
+            content = data.get("content", "")
+            if reasoning:
+                full_text = f"<think>{reasoning}</think>\n{content}"
+            else:
+                full_text = content
+        else:
+            # Standard Vertex non-streaming
+            full_text = ""
+            candidates = data.get("candidates", [])
+            if candidates:
+                cand = candidates[0]
+                parts = cand.get("content", {}).get("parts", [])
                 
-                if is_thought_part:
-                    if not is_thinking:
-                        full_text += "<think>\n"
-                        is_thinking = True
-                    full_text += text
-                else:
-                    if is_thinking:
-                        full_text += "\n</think>\n"
-                        is_thinking = False
-                    full_text += text
-            
-            if is_thinking:
-                full_text += "\n</think>\n"
+                is_thinking = False
+                for part in parts:
+                    text = part.get("text", "")
+                    is_thought_part = part.get("thought", False)
+                    
+                    if is_thought_part:
+                        if not is_thinking:
+                            full_text += "<think>\n"
+                            is_thinking = True
+                        full_text += text
+                    else:
+                        if is_thinking:
+                            full_text += "\n</think>\n"
+                            is_thinking = False
+                        full_text += text
+                
+                if is_thinking:
+                    full_text += "\n</think>\n"
         
         openai_resp = {
             "id": "chatcmpl-vertex-" + str(random.randint(100000, 999999)),
@@ -253,7 +290,7 @@ def translate_vertex_non_stream(raw_content):
         print(f"❌ Vertex Non-Stream Translation Error: {e}")
         return raw_content
 
-def handle_vertex_request(req, provider, model_config):
+def handle_vertex_request(req, provider, model_config, source_label=""):
     """
     Specialized handler for Vertex AI that strictly mimics the working Colab debugger logic.
     """
@@ -319,14 +356,14 @@ def handle_vertex_request(req, provider, model_config):
             }
             
             return Response(
-                stream_vertex_translation(resp),
+                stream_vertex_translation(resp, source_label, model_id),
                 status=resp.status_code,
                 headers=response_headers
             )
         else:
             resp = requests.post(url, headers=headers, json=vertex_body, stream=False, timeout=60)
             
-            translated = translate_vertex_non_stream(resp.content)
+            translated = translate_vertex_non_stream(resp.content, source_label, model_id)
             
             response_headers = {
                 "Access-Control-Allow-Origin": "*",
